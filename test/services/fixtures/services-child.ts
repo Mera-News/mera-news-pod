@@ -4,6 +4,7 @@ import { boot, type Pod } from '../../../src/boot';
 import { installProcessHandlers } from '../../../src/process';
 import type { PodServices } from '../../../src/plugin-api';
 import { createServices } from '../../../src/services';
+import { READING_TASKS } from '../../../src/control';
 
 const send = (message: unknown, done?: () => void) => process.send?.(message, undefined, undefined, () => done?.());
 process.on('disconnect', () => process.exit(0));
@@ -144,6 +145,11 @@ async function main() {
           const fact = await addFact(msg.arg.statement, undefined, undefined, { topicsStatus: msg.arg.status });
           const topics = await createTopics((msg.arg.topics ?? []).map((t: { text: string; provenance?: string }) => ({ factId: fact.id, text: t.text, weight: 1, provenance: t.provenance ?? 'llm' })));
           return reply({ id: fact.id, topicIds: topics.map((t) => t.id) });
+        }
+        case 'holdReads': { // pauses or resumes the reading tasks without the pod's own pause, so a state can be read before any read clears it
+          const { AppScheduler } = client<{ AppScheduler: { pauseTask(n: string): void; resumeTask(n: string): void } }>('scheduler/AppScheduler');
+          for (const name of READING_TASKS) (msg.arg ? AppScheduler.pauseTask(name) : AppScheduler.resumeTask(name));
+          return reply(null);
         }
         case 'lastRun': // makes the reading task look as if it finished a run just now
           client<{ useSchedulerStore: { getState(): { loadLastRunTimes(t: object): void } } }>('scheduler/scheduler-store').useSchedulerStore.getState().loadLastRunTimes({ 'feed-sync': msg.arg ?? Date.now() });

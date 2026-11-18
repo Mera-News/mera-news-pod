@@ -20,6 +20,9 @@ test('each state says what the pod is doing and when to look again, and an empty
   try {
     const pod = startServicesPod(w.home);
     assert.deepEqual(await pod.first, { ready: true });
+    // Reads are held until the "reading is on" step: a read could clear the unscored row planted below.
+    await pod.ask('holdReads', true);
+    await until(() => ok(pod, 'reading.status'), (s) => !s.readingNow, 'the boot read to end');
 
     // no facts yet
     let reply = await get(pod);
@@ -48,6 +51,7 @@ test('each state says what the pod is doing and when to look again, and an empty
     assert.match(reply.hint, /next read is/);
 
     // reading is on and nothing new matched
+    await pod.ask('holdReads', false);
     await pod.ask('patchRow', { id: 'unrated', patch: { status: 'complete', relevance: 0.3 } });
     await pod.ask('lastRun');
     // The new topic started a read of its own: wait for it to end.

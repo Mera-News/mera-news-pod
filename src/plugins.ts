@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { LoadedConfig } from './config';
-import { POD_API, type CreatePlugin, type Logger, type PodPlugin, type PodServices } from './plugin-api';
+import { POD_API, POD_API_VERSIONS, type CreatePlugin, type PodApiVersion, type Logger, type PodPlugin, type PodServices } from './plugin-api';
 
 export class PluginError extends Error {}
 
@@ -13,12 +13,24 @@ const STOP_TIMEOUT_MS = 5_000;
 const unavailable = () => Promise.reject(new Error('the pod is not running, so this is not available'));
 /** What a plugin gets when it is only being described, not run. */
 export const unavailableServices: PodServices = {
-  profile: { get: unavailable, addFacts: unavailable, removeFacts: unavailable, editTopics: unavailable },
+  profile: { get: unavailable, addFacts: unavailable, removeFacts: unavailable, editTopics: unavailable, hasProfile: unavailable, replaceProfile: unavailable },
   suggestions: { get: unavailable },
-  reading: { status: unavailable, set: unavailable },
+  reading: { status: unavailable, set: unavailable, readNow: unavailable },
+  commands: { run: unavailable },
   model: { chatCompletions: unavailable },
   news: { graphql: unavailable },
+  display: { snapshot: unavailable },
+  events: { on: () => () => {} },
 };
+
+/** Exactly the members a version 1 plugin was given, so a newer pod adds nothing to it. */
+const v1Services = (s: PodServices) => ({
+  profile: { get: s.profile.get, addFacts: s.profile.addFacts, removeFacts: s.profile.removeFacts, editTopics: s.profile.editTopics },
+  suggestions: { get: s.suggestions.get },
+  reading: { status: s.reading.status, set: s.reading.set },
+  model: s.model,
+  news: s.news,
+});
 
 export interface PluginDeps {
   services: PodServices;
@@ -41,7 +53,7 @@ const PLUGIN_NAME = /^[a-z][a-z0-9-]{0,39}$/;
 
 export async function loadPlugins(cfg: LoadedConfig, deps: PluginDeps): Promise<LoadedPlugins> {
   const { estimateTokens } = require('mera-news-client/dist/lib/algorithms/estimate-tokens') as { estimateTokens(text: string): number };
-  const loaded: { spec: string; name: string; plugin: PodPlugin }[] = [];
+  const loaded: { spec: string; name: string; plugin: PodPlugin; unlisten: (() => void)[] }[] = [];
 
   for (const entry of cfg.plugins) {
     const spec = entry.package;
@@ -60,7 +72,8 @@ export async function loadPlugins(cfg: LoadedConfig, deps: PluginDeps): Promise<
     }
     if (typeof mod.createPlugin !== 'function') throw fail('does not export createPlugin.');
     if (mod.podApi === undefined) throw fail(`does not say which plugin API it speaks. Export podApi = ${POD_API} next to createPlugin.`);
-    if (mod.podApi !== POD_API) throw fail(`needs plugin API version ${String(mod.podApi)}, and this pod speaks version ${POD_API}.`);
+    if (!(POD_API_VERSIONS as readonly unknown[]).includes(mod.podApi)) throw fail(`needs plugin API version ${String(mod.podApi)}, and this pod speaks versions ${POD_API_VERSIONS.join(' and ')}.`);
+    const podApi = mod.podApi as PodApiVersion;
     if (typeof mod.name !== 'string' || !PLUGIN_NAME.test(mod.name)) {
       throw fail('does not export a usable name. Export a short name of lower case letters, digits and dashes, starting with a letter.');
     }
@@ -77,15 +90,30 @@ export async function loadPlugins(cfg: LoadedConfig, deps: PluginDeps): Promise<
       warn: (m) => deps.write('warning', tag + m),
       error: (m) => deps.write('error', tag + m),
     };
+    // Listeners a plugin adds are removed when it stops, so a stopped plugin hears nothing.
+    const unlisten: (() => void)[] = [];
+    const services: PodServices =
+      podApi === 1
+        ? (v1Services(deps.services) as unknown as PodServices)
+        : {
+            ...deps.services,
+            events: {
+              on(event, listener) {
+                const off = deps.services.events.on(event, listener);
+                unlisten.push(off);
+                return off;
+              },
+            },
+          };
     try {
-      loaded.push({ spec, name, plugin: await mod.createPlugin({ podApi: POD_API, services: deps.services, config: entry.config, dataDir, log, estimateTokens }) });
+      loaded.push({ spec, name, unlisten, plugin: await mod.createPlugin({ podApi, services, config: entry.config, dataDir, log, estimateTokens }) });
     } catch (error) {
       throw fail(`did not start: ${oneLine(error)}`);
     }
   }
 
   const started: typeof loaded = [];
-  const stopOne = async ({ spec, plugin }: (typeof loaded)[number]) => {
+  const stopOne = async ({ spec, plugin, unlisten }: (typeof loaded)[number]) => {
     let timer: NodeJS.Timeout | undefined;
     const limit = new Promise<void>((resolve) => {
       timer = setTimeout(() => {
@@ -99,6 +127,7 @@ export async function loadPlugins(cfg: LoadedConfig, deps: PluginDeps): Promise<
       deps.write('warning', `The plugin ${spec} failed while stopping: ${oneLine(error)}`);
     } finally {
       clearTimeout(timer);
+      for (const off of unlisten.splice(0)) off();
     }
   };
   const stop = async () => {

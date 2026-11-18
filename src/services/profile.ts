@@ -2,6 +2,7 @@
 // Every write goes through the client's own functions, so a fact added here is treated exactly like
 // one added in the app: its topics are generated, and a removed topic is never generated back.
 import type { AddFactsResult, FactView, PodServices, RemoveFactsResult, TopicEditResult, TopicSource, TopicView, TopicsStatus } from '../plugin-api';
+import { PodError } from './ledger';
 
 type Fact = { id: string; statement: string; topicsStatus: string | null; createdAt: string; questionnaireAttribute?: string };
 type TopicRow = { id: string; text: string; weight: number; status: string; provenance: string; pendingDeleteAt: number | null };
@@ -17,10 +18,49 @@ const CONFLICT_NEXT = 'remove the fact it conflicts with first, or reword this o
 const SOURCES: Record<string, TopicSource> = { llm: 'generated', migration: 'generated', exploration: 'generated', combo: 'generated', user: 'added', feedback: 'added', tracked: 'followed' };
 const shown = (rows: TopicRow[]) => rows.filter((t) => t.pendingDeleteAt == null && t.status === 'active');
 
+// The tables a pairing replaces: everything a person's profile is made of.
+const PROFILE_TABLES = [
+  'facts', 'topics', 'declined_topics', 'persona_suppressions', 'locations', 'persona_summary_strings', 'persona_change_log',
+  'publication_preferences', 'user_publication_subscriptions', 'tracked_stories', 'saved_article_suggestions',
+] as const;
+
 export function createProfile(limits: () => Promise<string[]>): PodServices['profile'] {
   const byCreated = (a: Fact, b: Fact) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
 
   return {
+    async hasProfile() {
+      return (await facts().getFacts()).length > 0;
+    },
+
+    async replaceProfile({ schemaVersion, tables }) {
+      const { default: schema } = client<{ default: { version: number } }>('database/schema');
+      if (schemaVersion !== schema.version) {
+        const which = Number(schemaVersion) < schema.version ? 'phone' : 'server';
+        throw new PodError('schema_mismatch', `The ${which} is on an older version than the other side.`, `update the ${which}`);
+      }
+      const given: Record<string, { hash: string; mode: 'replace'; rows: Record<string, unknown>[] }> = {};
+      for (const name of PROFILE_TABLES) {
+        const rows = tables?.[name]?.rows;
+        if (!Array.isArray(rows)) throw new PodError('bad_profile', `The profile has no rows for ${name}.`, 'send every profile table, empty if it holds nothing');
+        if (new Set(rows.map((r) => r?.id)).size !== rows.length || rows.some((r) => typeof r?.id !== 'string' || r.id === '')) {
+          throw new PodError('bad_profile', `The rows for ${name} need an id each, with none repeated.`, 'send the rows as the phone holds them');
+        }
+        given[name] = { hash: '', mode: 'replace', rows };
+      }
+      // The feed was scored for the old profile: emptied in the same batch, so none of it becomes a
+      // pick. The pick history keeps its epoch; entries for the removed rows are pruned on the next read.
+      for (const name of ['article_suggestions', 'article_suggestion_facts']) given[name] = { hash: '', mode: 'replace', rows: [] };
+      const { COMMAND_REGISTRY_VERSION } = client<{ COMMAND_REGISTRY_VERSION: number }>('sync/command');
+      const { applySnapshot } = client<{ applySnapshot(snapshot: object, options: object): Promise<unknown> }>('sync/apply');
+      // The client's own apply: one writer and one batch, so a failure leaves every table as it was.
+      await applySnapshot(
+        { schemaVersion, registry: COMMAND_REGISTRY_VERSION, tables: given },
+        { local: { schemaVersion: schema.version, registry: COMMAND_REGISTRY_VERSION } },
+      );
+      const { AppScheduler } = client<{ AppScheduler: { trigger(name: string): Promise<string> } }>('scheduler/AppScheduler');
+      void AppScheduler.trigger('feed-sync').catch(() => {});
+    },
+
     async get(options) {
       const offset = Math.max(0, Math.floor(options?.offset ?? 0));
       const all = (await facts().getFacts()).sort(byCreated);

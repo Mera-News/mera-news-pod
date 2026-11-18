@@ -1,8 +1,11 @@
 // The contract between the pod and its plugins. A plugin imports these types only, never pod or
 // client code: it gets everything it may touch through the context the pod hands it.
 
-/** The contract version. A plugin that names another version is refused at boot. */
-export const POD_API = 1 as const;
+/** The newest contract version. The pod accepts a plugin that names this one or an older one it still speaks. */
+export const POD_API = 2 as const;
+/** Every contract version the pod speaks. A plugin that names another is refused at boot. */
+export const POD_API_VERSIONS = [1, 2] as const;
+export type PodApiVersion = (typeof POD_API_VERSIONS)[number];
 
 // --- What a plugin reads and changes -------------------------------------------------------------
 
@@ -114,12 +117,52 @@ export interface GraphqlReply {
   errors?: { message: string; extensions?: { code?: string; [key: string]: unknown } }[];
 }
 
+/** One table of a snapshot. `rows` is absent when the caller already holds this hash. */
+export interface SnapshotTable {
+  hash: string;
+  mode: 'replace' | 'merge';
+  rows?: Record<string, unknown>[];
+}
+
+/** A batch of named changes from a paired phone, run by the client's own registered writers. */
+export interface CommandRequest {
+  /** The schema and command registry versions the caller runs; a difference refuses the batch. */
+  schemaVersion: number;
+  registry: number;
+  /** The table hashes the caller holds, so the snapshot sent back carries only what changed. */
+  hashes?: Record<string, string>;
+  commands: { name: string; args?: unknown[] }[];
+}
+export type CommandResult = { ok: unknown } | { error: { code: string; message: string } };
+export interface CommandsReply {
+  /** One per command, in order; after the first error the rest are `earlier_change_failed`. */
+  results: CommandResult[];
+  /** The tables after the batch, as `display.snapshot` serves them for the same hashes. */
+  snapshot: Snapshot;
+}
+
+export interface Snapshot {
+  schemaVersion: number;
+  registry: number;
+  tables: Record<string, SnapshotTable>;
+}
+
 export interface PodServices {
   profile: {
     get(options?: { offset?: number }): Promise<ProfileView>;
     addFacts(statements: string[]): Promise<AddFactsResult>;
     removeFacts(ids: string[]): Promise<RemoveFactsResult>;
     editTopics(edit: TopicEdit): Promise<TopicEditResult>;
+    /** Contract version 2 and later. True when the pod holds at least one fact. */
+    hasProfile(): Promise<boolean>;
+    /**
+     * Contract version 2 and later. Replaces the pod's whole profile with the given rows (the tables
+     * a snapshot serves for facts, topics, places, preferences, followed and saved stories), clears
+     * the feed so no pick made for the old profile is delivered, and starts a read. It destroys the
+     * pod's profile: a plugin offers it only where the person chose it. The sync plugin allows it
+     * only for the first device paired.
+     */
+    replaceProfile(profile: { schemaVersion: number; tables: Record<string, { rows?: Record<string, unknown>[] }> }): Promise<void>;
   };
   suggestions: {
     /**
@@ -132,6 +175,13 @@ export interface PodServices {
   reading: {
     status(): Promise<PodStatus>;
     set(change: { paused?: boolean; everyMinutes?: number }): Promise<PodStatus>;
+    /** Contract version 2 and later. Starts a read: `ran`, `busy`, `debounced`, or `paused` while reading is paused. */
+    readNow(): Promise<string>;
+  };
+  /** Contract version 2 and later. */
+  commands: {
+    /** Runs the batch in order through the client's registered writers and returns the tables after it. */
+    run(request: CommandRequest): Promise<CommandsReply>;
   };
   model: {
     /**
@@ -147,6 +197,25 @@ export interface PodServices {
      */
     graphql(body: unknown): Promise<GraphqlReply | GraphqlReply[]>;
   };
+  /** Contract version 2 and later. */
+  display: {
+    /**
+     * The tables a phone shows, as plain rows. `hashes`: the hash the caller holds for each table; a
+     * table with that same hash comes back without rows. `peer`: the caller's own schema and registry
+     * versions; if they differ from the pod's the call fails with code `version_mismatch` and the
+     * message says which side is older.
+     */
+    snapshot(options?: { hashes?: Record<string, string>; peer?: { schemaVersion: number; registry: number } }): Promise<Snapshot>;
+  };
+  /** Contract version 2 and later. */
+  events: {
+    /**
+     * Calls `listener` with no arguments, at most once every two seconds, after any change to what
+     * `display.snapshot` serves or to the pick history. Returns a function that stops listening. A
+     * listener that throws is logged and does not stop the others.
+     */
+    on(event: 'changed', listener: () => void): () => void;
+  };
 }
 
 // --- What a plugin is given and returns ----------------------------------------------------------
@@ -161,7 +230,8 @@ export interface Logger {
 export type PodEvent = 'picks' | 'profile' | 'status';
 
 export interface PluginContext {
-  podApi: typeof POD_API;
+  /** The contract version the plugin named. */
+  podApi: PodApiVersion;
   services: PodServices;
   /** The plugin's own section of pod.json, as written. */
   config: unknown;
@@ -189,7 +259,7 @@ export type CreatePlugin = (context: PluginContext) => PodPlugin | Promise<PodPl
  * pod's plugins; it names the plugin's data directory (`<data>/plugins/<name>`).
  */
 export interface PluginModule {
-  podApi: typeof POD_API;
+  podApi: PodApiVersion;
   name: string;
   createPlugin: CreatePlugin;
 }

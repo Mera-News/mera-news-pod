@@ -4,6 +4,9 @@
 import type { ServicesContext } from '../boot';
 import { createNotifier, NOTIFY_LEVELS } from '../notify';
 import type { PickView, PodServices } from '../plugin-api';
+import { createDisplayService } from './display';
+import { createEvents } from './events';
+import { createCommands } from './commands';
 import { createLedger, PodError } from './ledger';
 import { readFeed } from './picks';
 import { createModelService } from './model';
@@ -17,8 +20,20 @@ export { PodError } from './ledger';
 export function createServices(context: ServicesContext): { services: PodServices; stop(): void } {
   const { cfg, control, log } = context;
   const snapshotInputs = { keyRefused: context.keyRefused, picksSetAside: undefined as string | undefined };
-  const ledger = createLedger(cfg.paths.picksFile);
-  snapshotInputs.picksSetAside = ledger.setAside;
+  const baseLedger = createLedger(cfg.paths.picksFile);
+  snapshotInputs.picksSetAside = baseLedger.setAside;
+  const changes = createEvents((line) => log('warning', line));
+  // Numbering a new story changes the pick history without touching a table, so it is reported here.
+  const ledger: typeof baseLedger = {
+    ...baseLedger,
+    async run(fn) {
+      const before = baseLedger.position();
+      const out = await baseLedger.run(fn);
+      const after = baseLedger.position();
+      if (before.epoch !== after.epoch || before.head !== after.head) changes.poke();
+      return out;
+    },
+  };
   const notifier = createNotifier(cfg);
   // Asked once, in the background: a plugin that needs it waits for the answer.
   const limits = fetchLimits(cfg);
@@ -62,11 +77,16 @@ export function createServices(context: ServicesContext): { services: PodService
   const stopTopics = watchTopicsReady((line) => log('warning', line));
   const stopStories = watchFinishedStories(async () => notifyNew(await feed()), (line) => log('warning', line));
 
+  // Served while reading is paused: it only reads what is already stored.
+  const display = createDisplayService();
   const services: PodServices = {
+    commands: createCommands(log, display),
     profile: createProfile(() => limits),
     // Chat is the person's own action, so it is served while reading is paused.
     model: createModelService(cfg),
     news: createNewsService(cfg),
+    display,
+    events: changes.events,
 
     suggestions: {
       async get({ since, limit, fits }) {
@@ -95,6 +115,10 @@ export function createServices(context: ServicesContext): { services: PodService
     },
 
     reading: {
+      // The scheduler's own answer: it is `paused` while reading is paused and `busy` while a read runs.
+      async readNow() {
+        return (require('mera-news-client/dist/lib/scheduler/AppScheduler') as { AppScheduler: { trigger(name: string): Promise<string> } }).AppScheduler.trigger('feed-sync');
+      },
       async status() {
         const [snapshot, picks, known] = await Promise.all([takeSnapshot(snapshotInputs), feed(), limits]);
         return buildStatus(cfg, control, snapshot, picks.length, known);
@@ -110,6 +134,7 @@ export function createServices(context: ServicesContext): { services: PodService
   return {
     services,
     stop() {
+      changes.stop();
       stopTopics();
       stopStories();
     },

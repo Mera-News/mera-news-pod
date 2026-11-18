@@ -51,7 +51,7 @@ test('every require and import in the build resolves under plain Node, the lazy 
   assert.ok(count > 50, `only ${count} requires found`);
 });
 
-test('the built pod, run with plain node, boots, reads and makes a pick with a reason', async () => {
+test('the built pod, run with plain node, boots, reads, makes a pick with a reason, and serves a version 2 plugin', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pod-built-'));
   const ids = Array.from({ length: 8 }, (_, i) => `sail${i}`);
   const words = ['harbour', 'regatta', 'keel', 'mainsail', 'spinnaker', 'mooring', 'tiller', 'jib'];
@@ -80,13 +80,18 @@ test('the built pod, run with plain node, boots, reads and makes a pick with a r
     const end = Date.now() + 90_000;
     while (Date.now() < end && pod.exitCode === null) {
       probe = fs.existsSync(probeFile) ? JSON.parse(fs.readFileSync(probeFile, 'utf8')) : undefined;
-      if (probe?.picks?.length) break;
+      if (probe?.picks?.length && probe.changed > 0 && probe.command) break;
       await new Promise((r) => setTimeout(r, 500));
     }
     const tail = `last pod lines:\n${output.slice(-15).join('\n')}`;
     assert.ok(probe?.picks?.length, `no pick within 90 s; probe ${JSON.stringify(probe)}; ${tail}`);
     assert.deepEqual([probe.execArgv, probe.nodeOptions], [[], ''], 'the pod ran with no loader');
     assert.ok(probe.picks.every((p: { reason: string }) => p.reason.length > 0), 'every pick has a reason');
+    // The newest contract, through the built code: a snapshot, a phone's command, and the change event.
+    assert.ok(probe.snapshotFacts > 0, `the snapshot serves the facts: ${JSON.stringify(probe)}`);
+    assert.ok(probe.command && 'ok' in probe.command, `the command ran: ${JSON.stringify(probe.command)}`);
+    assert.deepEqual(probe.factsAfterCommand, ['Follows rowing', 'Follows sailing']);
+    assert.ok(probe.changed > 0, 'the plugin heard a change');
     assert.deepEqual(output.filter((l) => /ERR_MODULE_NOT_FOUND|Cannot find module|blocked request to/.test(l)), [], tail);
     assert.ok(output.some((l) => l === 'The pod is running and reads every 2 seconds (MERA_POD_INTERVAL_SECONDS).'), tail);
     pod.kill('SIGTERM');

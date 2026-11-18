@@ -1,0 +1,51 @@
+{
+  "name": "mera-news-pod",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mera News on your own machine: it keeps your news profile and reads the news for you, and you reach it through plugins.",
+  "license": "AGPL-3.0-only",
+  "author": "Mera Labs B.V.",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "exports": {
+    "./plugin-api": {
+      "types": "./build/plugin-api.d.ts",
+      "default": "./build/plugin-api.js"
+    },
+    "./testing": {
+      "types": "./build/testing/index.d.ts",
+      "default": "./build/testing/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "mera-news-pod": "build/cli.js"
+  },
+  "files": [
+    "build",
+    "sqlite-driver"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@apollo/client": "^4.3.5",
+    "@nozbe/watermelondb": "0.28.0",
+    "better-sqlite3": "file:./sqlite-driver",
+    "graphql": "^16.11.0",
+    "i18next": "^26.5.12",
+    "mera-news-client": "git+https://github.com/Mera-News/mera-news-client.git#6d1e9ccd58179e3e768f63cbe508ee3ed579ea5e",
+    "react": "19.3.0",
+    "rxjs": "^7.8.2",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3"
+  }
+}

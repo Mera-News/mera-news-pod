@@ -1,0 +1,8 @@
+{
+  "name": "better-sqlite3",
+  "version": "0.0.0-node-sqlite",
+  "private": true,
+  "description": "The SQLite driver WatermelonDB loads under Node: the node:sqlite driver that mera-news-client ships.",
+  "main": "index.js",
+  "license": "AGPL-3.0-only"
+}

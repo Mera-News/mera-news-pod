@@ -7,6 +7,7 @@ Your profile stays on the machine that runs the pod. Nothing phones home: the po
 3. **The data server.** Your topics go to it as search queries. Run your own data server, as the pod expects, and they stay with you.
 4. **Notifiers.** A public ntfy topic can be read by anyone who knows its name, and it gets the headline, the level and the link of each important pick. A webhook gets the same plus the one-line reason, at the address you give. A saved fact is never sent.
 5. **Plugins.** A plugin is code that runs inside the pod with its full access, so only install plugins you trust.
-6. **A tunnel.** If you reach the pod from outside your network, whoever runs the tunnel can read the traffic it carries, including the token.
+6. **A paired phone.** The phone paired through the `sync` plugin sees the whole profile, the chats sent through the pod and the reading. A pod is for one person and pairs with one phone; see [pairing the app](sync.md).
+7. **A tunnel.** If you reach the pod from outside your network, whoever runs the tunnel can read the traffic it carries, including the token.
 
 See [clients](clients.md) for the capability address, which works as a password.

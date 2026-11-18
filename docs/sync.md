@@ -2,6 +2,12 @@
 
 The Mera News app can show a pod's news, profile and picks instead of reading the news on the phone. The phone then stops reading the news itself: the pod reads, and the phone shows what the pod holds and sends your changes to it. This works through the `sync` plugin, which lives in the `mera-news-pod-plugins` repository, in `packages/sync`.
 
+## One pod, one person, one phone
+
+A pod is for one person, and it pairs with one phone at a time. A paired phone sees everything the pod holds: the whole profile, the chats sent through the pod and the reading. A second person on the same pod would see all of it, so the pod refuses a second pairing while a phone is paired.
+
+An assistant connected through the `mcp` plugin is not a paired phone. The same person can use an assistant and one phone on one pod.
+
 ## Install the plugin
 
 If you have not built the plugins yet:
@@ -48,18 +54,18 @@ Add `--home <folder>` when the pod does not use the default home. It prints a co
 
 The code has 10 characters, works once and lasts 10 minutes. After 10 wrong codes in all, or 5 tries in one minute, pairing stops until you print a new code.
 
-When you pair the first phone and both the phone and the pod already have a profile, the app asks which one to keep. The other is replaced. Only the phone that is the one paired device at that moment can replace the pod's profile. A phone paired later always takes the pod's profile.
+**Pairing erases the phone's own data.** The app warns you first. After pairing, the phone shows only what the pod holds. Nothing from the phone is merged into the pod, and a phone's profile cannot be moved to a pod yet. If the pod has no profile, add facts from the app or through an assistant.
 
-## Several phones and revoking one
+## Change or remove the paired phone
 
-Each phone pairs with its own code. To see them and remove one:
+To see the paired phone, and to revoke it:
 
 ```
 npx mera-news-pod-sync devices
 npx mera-news-pod-sync devices --revoke <id>
 ```
 
-A revoked phone is refused on its next request. Logging out of the app also revokes the phone, when the pod can be reached.
+While a phone is paired, `pair` prints no code and says which phone to revoke. Revoke it, then run `pair` again for the new phone. A revoked phone is refused on its next request. Logging out of the app also revokes the phone, when the pod can be reached.
 
 ## What a paired phone can do
 
@@ -67,11 +73,13 @@ A paired phone holds a device token. With it the phone can read your profile, fe
 
 The AI service's key and the news server's key stay on the pod. The phone never sees them.
 
-## Shared and per-device settings
+## Settings
 
-A paired phone shares these settings with the pod and with every other paired phone, one value for all: the language, Skip notes, the 24-hour filter, the Explore choices and the topics you rejected. The language is also the language the pod writes reasons in, for every phone.
+The language, Skip notes, the 24-hour filter, the Explore choices and the topics you rejected are the pod's settings: the phone changes them on the pod. The language is also the language the pod writes reasons in. Where you are in the feed stays on the phone.
 
-Where you are in the feed stays on each phone.
+## Backups
+
+The app's iCloud and Google Drive backups are off while the phone is paired, since the data is on the pod. Backing up the pod is up to you: stop it and copy its home folder, as in [back up](self-hosting.md#back-up).
 
 ## What the phone still sends to Mera
 

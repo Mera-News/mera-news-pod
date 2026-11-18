@@ -108,6 +108,12 @@ export interface PodStatus {
   dataServer: { host: string };
 }
 
+/** What the data server answers to a GraphQL request, as it sent it. */
+export interface GraphqlReply {
+  data?: unknown;
+  errors?: { message: string; extensions?: { code?: string; [key: string]: unknown } }[];
+}
+
 export interface PodServices {
   profile: {
     get(options?: { offset?: number }): Promise<ProfileView>;
@@ -126,6 +132,20 @@ export interface PodServices {
   reading: {
     status(): Promise<PodStatus>;
     set(change: { paused?: boolean; everyMinutes?: number }): Promise<PodStatus>;
+  };
+  model: {
+    /**
+     * Sends a chat completion to the pod's own AI endpoint with the pod's key and model. Only the
+     * chat fields of the body pass and a `tools` field is refused. The reply streams back as it is.
+     */
+    chatCompletions(body: unknown, signal?: AbortSignal): Promise<Response>;
+  };
+  news: {
+    /**
+     * Sends news queries to the pod's data server. Only the news queries the client uses pass; any
+     * other operation, or a batch holding one, answers a NOT_ALLOWED error without a request.
+     */
+    graphql(body: unknown): Promise<GraphqlReply | GraphqlReply[]>;
   };
 }
 

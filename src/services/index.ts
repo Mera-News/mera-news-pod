@@ -6,6 +6,8 @@ import { createNotifier, NOTIFY_LEVELS } from '../notify';
 import type { PickView, PodServices } from '../plugin-api';
 import { createLedger, PodError } from './ledger';
 import { readFeed } from './picks';
+import { createModelService } from './model';
+import { createNewsService } from './news';
 import { createProfile } from './profile';
 import { buildStatus, fetchLimits, judge, takeSnapshot } from './status';
 import { watchFinishedStories, watchTopicsReady } from './watchers';
@@ -62,6 +64,9 @@ export function createServices(context: ServicesContext): { services: PodService
 
   const services: PodServices = {
     profile: createProfile(() => limits),
+    // Chat is the person's own action, so it is served while reading is paused.
+    model: createModelService(cfg),
+    news: createNewsService(cfg),
 
     suggestions: {
       async get({ since, limit, fits }) {

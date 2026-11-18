@@ -16,6 +16,8 @@ export const unavailableServices: PodServices = {
   profile: { get: unavailable, addFacts: unavailable, removeFacts: unavailable, editTopics: unavailable },
   suggestions: { get: unavailable },
   reading: { status: unavailable, set: unavailable },
+  model: { chatCompletions: unavailable },
+  news: { graphql: unavailable },
 };
 
 export interface PluginDeps {

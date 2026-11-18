@@ -38,7 +38,7 @@
     "better-sqlite3": "file:./sqlite-driver",
     "graphql": "^16.11.0",
     "i18next": "^26.5.12",
-    "mera-news-client": "git+https://github.com/Mera-News/mera-news-client.git#9f75de555f9df32e3989557e97f0e4f49508c409",
+    "mera-news-client": "git+https://github.com/Mera-News/mera-news-client.git#d3214a4ed444b30c328900da4872758013a64d05",
     "react": "19.3.0",
     "rxjs": "^7.8.2",
     "zustand": "^5.0.16"

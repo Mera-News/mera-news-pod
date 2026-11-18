@@ -12,6 +12,8 @@ const noServices: PodServices = {
   profile: { get: async () => ({ facts: [] }), addFacts: async () => ({ added: [], already: [], refused: [] }), removeFacts: async () => ({ removed: [], notFound: [] }), editTopics: async () => ({ results: [] }) },
   suggestions: { get: async () => ({ state: 'ok', hint: '', nextReadAt: null, picks: [], cursor: '', more: false }) },
   reading: { status: async () => ({}) as never, set: async () => ({}) as never },
+  model: { chatCompletions: async () => new Response('{}') },
+  news: { graphql: async () => ({ data: null }) },
 };
 
 async function main() {

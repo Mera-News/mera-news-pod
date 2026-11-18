@@ -6,7 +6,13 @@ export function acquireLock(file: string): { release(): void } {
   const db = new DatabaseSync(file);
   try {
     db.exec('pragma locking_mode = EXCLUSIVE');
+    // In exclusive locking mode a connection keeps its lock after its first write until it closes,
+    // so the lock does not depend on a transaction staying open on an empty file.
     db.exec('begin exclusive');
+    db.exec('create table if not exists holder (pid integer)');
+    db.exec('delete from holder');
+    db.prepare('insert into holder (pid) values (?)').run(process.pid);
+    db.exec('commit');
   } catch (error) {
     db.close();
     if ((error as { errcode?: number }).errcode === 5 || /locked|busy/i.test(String((error as Error).message))) {
@@ -20,7 +26,6 @@ export function acquireLock(file: string): { release(): void } {
     release() {
       if (!held) return;
       held = false;
-      db.exec('rollback');
       db.close();
     },
   };

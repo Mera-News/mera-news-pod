@@ -266,25 +266,21 @@ test('no log line carries a command argument, a fact or a topic', async () => {
 });
 
 test('a stopped pod keeps no timer that a paired phone\'s mute or topic delete started', async () => {
-  // Both pods do the same work but the mute and the delete, paused so no read adds timers of its own.
-  const count = async (stage: boolean) => {
-    const w = await world();
-    try {
-      const pod = startServicesPod(w.home);
-      assert.deepEqual(await pod.first, { ready: true });
-      await ok(pod, 'reading.set', { paused: true });
-      const { topicIds } = await pod.ask('plantFact', { statement: 'Follows chess', status: 'done', topics: [{ text: 'chess news' }] });
-      if (stage) {
-        const staged = await run(pod, [
-          { name: 'deleteTopicWithDecline', args: [topicIds[0], { undoWindowMs: 60_000 }] },
-          { name: 'setSourcePrefFromUi', args: [{ kind: 'publisher', names: ['Paper One'] }, 'muted'] },
-        ]);
-        assert.ok(staged.results.every((r: object) => 'ok' in r), JSON.stringify(staged.results));
-      }
-      return (await pod.ask('stopAndCountTimers')) as number;
-    } finally {
-      await w.close();
-    }
-  };
-  assert.equal(await count(true), await count(false), 'the mute and the staged delete left no timer behind');
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await ok(pod, 'reading.set', { paused: true });
+    const { topicIds } = await pod.ask('plantFact', { statement: 'Follows chess', status: 'done', topics: [{ text: 'chess news' }] });
+    const staged = await run(pod, [
+      { name: 'deleteTopicWithDecline', args: [topicIds[0], { undoWindowMs: 60_000 }] },
+      { name: 'setSourcePrefFromUi', args: [{ kind: 'publisher', names: ['Paper One'] }, 'muted'] },
+    ]);
+    assert.ok(staged.results.every((r: object) => 'ok' in r), JSON.stringify(staged.results));
+    const { before, after } = (await pod.ask('stopAndCountDelayedWrites')) as { before: number; after: number };
+    assert.equal(before, 2, 'the mute and the staged delete each started a timer');
+    assert.equal(after, 0, 'stop cleared both');
+  } finally {
+    await w.close();
+  }
 });

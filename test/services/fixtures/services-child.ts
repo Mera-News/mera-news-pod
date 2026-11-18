@@ -9,6 +9,26 @@ const send = (message: unknown, done?: () => void) => process.send?.(message, un
 process.on('disconnect', () => process.exit(0));
 
 const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
+
+// The timers the client's delayed writes start (a mute's purge, a staged topic delete), told apart
+// by where they were made, so a test can ask about exactly those and not every timer in the process.
+const delayedWrites = new Set<unknown>();
+const DELAYED_WRITE = /publication-pref-ui-actions|topic-decline-service/;
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+globalThis.setTimeout = ((fn: (...a: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+  const tracked = DELAYED_WRITE.test(new Error().stack ?? '');
+  const timer = realSetTimeout((...a: unknown[]) => {
+    delayedWrites.delete(timer);
+    fn(...a);
+  }, ms, ...args);
+  if (tracked) delayedWrites.add(timer);
+  return timer;
+}) as typeof setTimeout;
+globalThis.clearTimeout = ((timer?: Parameters<typeof clearTimeout>[0]) => {
+  delayedWrites.delete(timer);
+  realClearTimeout(timer);
+}) as typeof clearTimeout;
 type Row = {
   id: string;
   status?: string;
@@ -146,11 +166,11 @@ async function main() {
         }
         case 'overlap': return reply({ overlap, runs });
         case 'stop': await pod.stop(); return send({ id: msg.id, value: null }, () => process.exit(0));
-        // Stops the pod and answers how many timers are still alive, then exits.
-        case 'stopAndCountTimers': {
+        // Stops the pod and answers how many delayed-write timers were alive before and after, then exits.
+        case 'stopAndCountDelayedWrites': {
+          const before = delayedWrites.size;
           await pod.stop();
-          const timers = (process as unknown as { getActiveResourcesInfo(): string[] }).getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
-          return send({ id: msg.id, value: timers }, () => process.exit(0));
+          return send({ id: msg.id, value: { before, after: delayedWrites.size } }, () => process.exit(0));
         }
       }
     } catch (error) {

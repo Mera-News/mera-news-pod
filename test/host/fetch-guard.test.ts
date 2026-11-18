@@ -46,7 +46,7 @@ test('another host and another port are refused before any request is made', asy
   assert.equal(logs.filter((l) => l.includes(originOf(other))).length, 1, 'logged once per origin');
 });
 
-test('a redirect is an error, even to an allowed origin', async () => {
+test('a redirect is never followed, even to an allowed origin', async () => {
   const target = await serve((_req, res) => res.end('target'));
   const s = await serve((_req, res) => {
     res.writeHead(302, { location: `${originOf(target)}/landed` });
@@ -58,6 +58,10 @@ test('a redirect is an error, even to an allowed origin', async () => {
   assert.ok(!hits.some((h) => h.endsWith('/landed')));
   // A caller asking to follow redirects does not get them.
   await assert.rejects(fetch(`${originOf(s)}/go`, { redirect: 'follow' }));
+  // A caller that asks for the redirect itself gets it unfollowed, so it can stop without retrying.
+  const res = await fetch(`${originOf(s)}/go`, { redirect: 'manual' });
+  assert.equal(res.status, 302);
+  assert.ok(!hits.some((h) => h.endsWith('/landed')));
 });
 
 test('a Request object and a URL object are checked the same way', async () => {

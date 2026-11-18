@@ -26,7 +26,8 @@ export function guardedFetch(
       }
       return Promise.reject(Object.assign(new Error(`blocked request to ${origin}`), { name: 'BlockedRequestError' }));
     }
-    return real(input, { ...init, redirect: 'error' }).then((res) => {
+    // `manual` follows nothing either: the caller sees the 3xx and stops, where an error would be retried.
+    return real(input, { ...init, redirect: init?.redirect === 'manual' ? 'manual' : 'error' }).then((res) => {
       onStatus(origin, res.status);
       return res;
     });

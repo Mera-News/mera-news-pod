@@ -25,7 +25,7 @@ test('status says what the pod is and what it talks to, without secrets or fact 
     assert.equal(typeof status.unscored, 'number');
     assert.deepEqual(status.ai, { host: new URL(w.model.baseUrl).host, model: 'm' });
     assert.deepEqual(status.dataServer, { host: new URL(w.data.origin).host });
-    assert.deepEqual(status.limits, ['world headlines']);
+    assert.deepEqual(status.limits, []);
     assert.doesNotMatch(JSON.stringify(status), /chess|sailing/);
     await pod.ask('stop');
   } finally {

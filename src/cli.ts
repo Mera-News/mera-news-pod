@@ -2,6 +2,7 @@
 // The command line: init writes a starting config, check tries the two servers and the plugins,
 // start runs the pod. Everything printed is for a person, so each problem is one sentence that
 // says what to fix.
+import './quiet-sqlite';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';

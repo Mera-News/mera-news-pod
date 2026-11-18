@@ -18,25 +18,42 @@ const FEATURE_QUERIES: Record<string, [query: string, arg?: string]> = {
   'world headlines': ['worldHeadlines'],
 };
 
-/** One question to the data server at start: which queries it answers. Any refusal gives the full list. */
-export async function fetchLimits(cfg: LoadedConfig): Promise<string[]> {
+/** What the data server offers. `placesNotLoaded`: it answers place lookups but holds no places yet. */
+export interface DataServerInfo {
+  limits: string[];
+  placesNotLoaded: boolean;
+}
+
+async function ask<T>(cfg: LoadedConfig, query: string): Promise<{ ok: boolean; data?: T }> {
+  const res = await fetch(cfg.dataServer.graphqlUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(cfg.dataServer.apiKey ? { 'x-api-key': cfg.dataServer.apiKey } : {}) },
+    body: JSON.stringify({ query }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  return { ok: res.ok, data: ((await res.json()) as { data?: T }).data };
+}
+
+/**
+ * Asked once at start: which queries the data server answers, and, where it says so in its status,
+ * whether its places are loaded. Any refusal gives the full list.
+ */
+export async function fetchLimits(cfg: LoadedConfig): Promise<DataServerInfo> {
+  const unknown = { limits: ALL_LIMITS, placesNotLoaded: false };
   try {
-    const res = await fetch(cfg.dataServer.graphqlUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...(cfg.dataServer.apiKey ? { 'x-api-key': cfg.dataServer.apiKey } : {}) },
-      body: JSON.stringify({ query: '{ __type(name: "Query") { fields { name args { name } } } }' }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    const body = (await res.json()) as { data?: { __type?: { fields?: { name: string; args?: { name: string }[] }[] } } };
-    const fields = body.data?.__type?.fields;
-    if (!res.ok || !fields) return ALL_LIMITS;
+    const shape = await ask<{ __type?: { fields?: { name: string; args?: { name: string }[] }[] } }>(cfg, '{ __type(name: "Query") { fields { name args { name } } } }');
+    const fields = shape.data?.__type?.fields;
+    if (!shape.ok || !fields) return unknown;
     const has = ([query, arg]: [string, string?]) => {
       const field = fields.find((f) => f.name === query);
       return !!field && (!arg || (field.args ?? []).some((a) => a.name === arg));
     };
-    return ALL_LIMITS.filter((feature) => !has(FEATURE_QUERIES[feature]));
+    const limits = ALL_LIMITS.filter((feature) => !has(FEATURE_QUERIES[feature]));
+    if (limits.includes('place lookup') || !has(['newsServerStatus'])) return { limits, placesNotLoaded: false };
+    const status = await ask<{ newsServerStatus?: { placesSeeded?: boolean } }>(cfg, '{ newsServerStatus { placesSeeded } }').catch(() => null);
+    return { limits, placesNotLoaded: status?.data?.newsServerStatus?.placesSeeded === false };
   } catch {
-    return ALL_LIMITS;
+    return unknown;
   }
 }
 
@@ -169,7 +186,7 @@ export function judge(s: Snapshot, paused: boolean, returned = 0, now = Date.now
   return { state, hint, nextReadAt };
 }
 
-export function buildStatus(cfg: LoadedConfig, control: Control, s: Snapshot, picks: number, limits: string[]): PodStatus {
+export function buildStatus(cfg: LoadedConfig, control: Control, s: Snapshot, picks: number, server: DataServerInfo): PodStatus {
   const paused = control.get().paused;
   return {
     reading: control.readingState(),
@@ -180,8 +197,13 @@ export function buildStatus(cfg: LoadedConfig, control: Control, s: Snapshot, pi
     nextReadAt: nextReadAtOf(s, paused),
     unscored: s.unscored,
     counts: { facts: s.facts, topics: s.topics, topicsPending: s.topicsPending, picks },
-    problems: problemsOf(s),
-    limits,
+    problems: [
+      ...problemsOf(s),
+      ...(server.placesNotLoaded
+        ? [{ code: 'places_not_loaded', who: 'person' as const, fix: 'The data server has no places loaded, so a place in a fact is not looked up. Load them on the data server with its seed-places command, then restart the pod.' }]
+        : []),
+    ],
+    limits: server.limits,
     ai: { host: new URL(cfg.ai.baseUrl).host, model: cfg.ai.model },
     dataServer: { host: new URL(cfg.dataServer.graphqlUrl).host },
   };

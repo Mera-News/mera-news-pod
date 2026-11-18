@@ -36,7 +36,7 @@ export function createServices(context: ServicesContext): { services: PodService
   };
   const notifier = createNotifier(cfg);
   // Asked once, in the background: a plugin that needs it waits for the answer.
-  const limits = fetchLimits(cfg);
+  const dataServer = fetchLimits(cfg);
 
   /** Reads the Feed and numbers its new stories, inside the ledger's one chain. */
   const feed = () =>
@@ -81,7 +81,7 @@ export function createServices(context: ServicesContext): { services: PodService
   const display = createDisplayService();
   const services: PodServices = {
     commands: createCommands(log, display),
-    profile: createProfile(() => limits),
+    profile: createProfile(() => dataServer),
     // Chat is the person's own action, so it is served while reading is paused.
     model: createModelService(cfg),
     news: createNewsService(cfg),
@@ -120,7 +120,7 @@ export function createServices(context: ServicesContext): { services: PodService
         return (require('mera-news-client/dist/lib/scheduler/AppScheduler') as { AppScheduler: { trigger(name: string): Promise<string> } }).AppScheduler.trigger('feed-sync');
       },
       async status() {
-        const [snapshot, picks, known] = await Promise.all([takeSnapshot(snapshotInputs), feed(), limits]);
+        const [snapshot, picks, known] = await Promise.all([takeSnapshot(snapshotInputs), feed(), dataServer]);
         return buildStatus(cfg, control, snapshot, picks.length, known);
       },
       async set(change) {

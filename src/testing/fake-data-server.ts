@@ -42,6 +42,16 @@ export interface FakeDataServerOptions {
   topics: Record<string, string[]>;
   /** Ids served as top headlines, in order. Unset: every article. */
   headlines?: string[];
+  /** The places `placeSearch` finds. Unset or empty: the server says places are not loaded. */
+  places?: FakePlace[];
+}
+
+/** One place as the server stores it. Only `city` and `countryCode` are required. */
+export interface FakePlace {
+  city: string;
+  countryCode: string;
+  region?: string | null;
+  population?: number | null;
 }
 
 export interface FakeDataServer {
@@ -81,13 +91,19 @@ const asNewsArticle = (a: FakeArticle, now: string) => {
   return {
     ...full,
     description: full.description_en,
-    source_uri: full.article_url,
+    // The public server sends a stored address without its query string.
+    source_uri: withoutQuery(full.article_url),
     type: 'article',
     publicationSourceId: `pub-${a._id}`,
     country: full.country_code,
     createdAt: full.pubDate,
     updatedAt: full.pubDate,
   };
+};
+
+const withoutQuery = (url: string) => {
+  const u = new URL(url);
+  return `${u.origin}${u.pathname}`;
 };
 
 const slug = (name: string) => norm(name).replace(/[^a-z0-9]+/g, '-');
@@ -186,6 +202,37 @@ function resolversFor(options: FakeDataServerOptions) {
     },
     recentArticleCount: ({ since }: { since?: string | null }) =>
       articles.filter((a) => !since || Date.parse(a.pubDate ?? now) >= Date.parse(since)).length,
+    // Anchored prefix on the lowercase name, most populous first, nothing under two characters, at most 15.
+    placeSearch: ({ query, limit }: { query: string; limit: number }) => {
+      const q = norm(query);
+      if (q.length < 2) return [];
+      return (options.places ?? [])
+        .filter((p) => norm(p.city).startsWith(q))
+        .sort((a, b) => (b.population ?? 0) - (a.population ?? 0))
+        .slice(0, Math.min(limit, 15))
+        .map((p) => ({
+          _id: `place-${slug(p.city)}-${p.countryCode}`,
+          city: p.city,
+          countryCode: p.countryCode,
+          region: p.region ?? null,
+          population: p.population ?? null,
+          displayName: [p.city, p.region, p.countryCode].filter(Boolean).join(', '),
+          normalized: norm(p.city),
+          search_keys: [norm(p.city)],
+          latitude: null,
+          longitude: null,
+        }));
+    },
+    // Only what the fake knows: its places and its newest article. Clustering and the index never ran.
+    newsServerStatus: () => ({
+      placesSeeded: (options.places ?? []).length > 0,
+      lastArticleAt: articles.length ? articles.map((a) => withDefaults(a, now).pubDate).sort().at(-1) : null,
+      lastClusteringAt: null,
+      lastTopicLinkAt: null,
+      headlineEditionsBuilt: false,
+      vectorIndexState: null,
+      embeddingModel: null,
+    }),
     topHeadlinesForCountry: ({ countryCode, first, windowHours }: { countryCode?: string | null; first: number; windowHours: number }) => {
       if (!WINDOWS.includes(windowHours)) throw new GraphQLError(`windowHours must be one of ${WINDOWS.join(', ')}`, { extensions: { code: 'BAD_WINDOW' } });
       const code = countryCode?.toUpperCase() === 'GLOBAL' ? null : countryCode;

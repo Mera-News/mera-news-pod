@@ -104,13 +104,15 @@ test('a fact that finished with no topics is retried too', async () => {
   }
 });
 
-test('a home fact says local coverage is weaker only when the data server has no place lookup', async () => {
+test('a home fact says local coverage is weaker only while the data server has no places loaded', async () => {
   const w = await world();
   try {
     const pod = startServicesPod(w.home);
     assert.deepEqual(await pod.first, { ready: true });
     const status = await ok(pod, 'reading.status');
-    assert.ok(status.limits.includes('place lookup'), 'the fake data server does not offer it');
+    // The fake answers place lookups but holds no places: a reason, not a missing feature.
+    assert.ok(!status.limits.includes('place lookup'));
+    assert.deepEqual(status.problems.filter((p: any) => p.code === 'places_not_loaded').map((p: any) => p.who), ['person']);
     assert.equal((await ok(pod, 'profile.addFacts', ['Follows chess'])).localCoverageWeaker, undefined);
     assert.equal((await ok(pod, 'profile.addFacts', ['Lives in Utrecht'])).localCoverageWeaker, true);
     await pod.ask('stop');
@@ -118,15 +120,15 @@ test('a home fact says local coverage is weaker only when the data server has no
     await w.close();
   }
 
-  const withLookup = await world({ extraSchema: 'extend type Query { placeSearch: String }' });
+  const seeded = await world({ places: [{ city: 'Utrecht', countryCode: 'NL' }] });
   try {
-    const pod = startServicesPod(withLookup.home);
+    const pod = startServicesPod(seeded.home);
     assert.deepEqual(await pod.first, { ready: true });
-    assert.ok(!(await ok(pod, 'reading.status')).limits.includes('place lookup'));
+    assert.deepEqual((await ok(pod, 'reading.status')).problems.map((p: any) => p.code).filter((c: string) => c === 'places_not_loaded'), []);
     assert.equal((await ok(pod, 'profile.addFacts', ['Lives in Utrecht'])).localCoverageWeaker, undefined);
     await pod.ask('stop');
   } finally {
-    await withLookup.close();
+    await seeded.close();
   }
 });
 

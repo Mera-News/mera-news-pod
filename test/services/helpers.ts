@@ -2,12 +2,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { killAll, startPod, type Child, type World } from '../boot/helpers';
-import { defaultSchemaPath, startFakeDataServer, startFakeModel, type FakeArticle, type FakeModelOptions } from '../../src/testing';
+import { defaultSchemaPath, startFakeDataServer, startFakeModel, type FakeArticle, type FakePlace, type FakeModelOptions } from '../../src/testing';
 
 export { killAll, type World };
 
 /** A temporary home and two local fakes. The data server holds no articles unless given some, so only planted rows exist. */
-export async function world(options: { articles?: FakeArticle[]; topics?: Record<string, string[]>; model?: FakeModelOptions; config?: object; extraSchema?: string } = {}): Promise<World> {
+export async function world(options: { articles?: FakeArticle[]; topics?: Record<string, string[]>; model?: FakeModelOptions; config?: object; extraSchema?: string; places?: FakePlace[] } = {}): Promise<World> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pod-services-'));
   let schemaPath = defaultSchemaPath();
   if (options.extraSchema) {
@@ -15,7 +15,7 @@ export async function world(options: { articles?: FakeArticle[]; topics?: Record
     schemaPath = path.join(home, 'schema.gql');
     fs.writeFileSync(schemaPath, `${fs.readFileSync(defaultSchemaPath(), 'utf8')}\n${options.extraSchema}\n`);
   }
-  const data = await startFakeDataServer({ schemaPath, articles: options.articles ?? [], topics: options.topics ?? {} });
+  const data = await startFakeDataServer({ schemaPath, articles: options.articles ?? [], topics: options.topics ?? {}, places: options.places });
   const model = await startFakeModel(options.model);
   fs.writeFileSync(path.join(home, 'pod.json'), JSON.stringify({ dataServer: { url: data.origin }, ai: { baseUrl: model.baseUrl, model: 'm' }, language: 'en', ...options.config }));
   return {

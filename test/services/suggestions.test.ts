@@ -202,7 +202,8 @@ test('facts that all came back without topics are a problem the assistant can re
     plain(reply.hint);
     assert.match(reply.hint, /retries/);
     const status = await ok(pod, 'reading.status');
-    assert.deepEqual(status.problems.map((p: any) => [p.code, p.who]), [['no_topics', 'assistant']]);
+    // The fake holds no places, which is its own problem; this one is about topics.
+    assert.deepEqual(status.problems.filter((p: any) => p.code !== 'places_not_loaded').map((p: any) => [p.code, p.who]), [['no_topics', 'assistant']]);
     await pod.ask('stop');
   } finally {
     await w.close();

@@ -114,6 +114,29 @@ describe('fake data server', () => {
     assert.equal(bad.errors[0].extensions.code, 'BAD_WINDOW');
   });
 
+  it('searches places by prefix and says in its status whether any are loaded', async () => {
+    const places = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles, topics: {}, places: [
+      { city: 'Utrecht', countryCode: 'NL', population: 360000 },
+      { city: 'Utica', countryCode: 'US', population: 60000 },
+      { city: 'Amsterdam', countryCode: 'NL', population: 900000 },
+    ] });
+    try {
+      const found = (await (await query(places, '{ placeSearch(query: "ut") { city countryCode } }')).json()) as any;
+      assert.deepEqual(found.data.placeSearch, [{ city: 'Utrecht', countryCode: 'NL' }, { city: 'Utica', countryCode: 'US' }]);
+      const short = (await (await query(places, '{ placeSearch(query: "u") { city } }')).json()) as any;
+      assert.deepEqual(short.data.placeSearch, []);
+      const status = (await (await query(places, '{ newsServerStatus { placesSeeded lastArticleAt lastClusteringAt vectorIndexState } }')).json()) as any;
+      assert.equal(status.data.newsServerStatus.placesSeeded, true);
+      assert.equal(status.data.newsServerStatus.lastClusteringAt, null);
+      assert.equal(status.data.newsServerStatus.vectorIndexState, null);
+      assert.ok(Date.parse(status.data.newsServerStatus.lastArticleAt) > 0);
+    } finally {
+      await places.close();
+    }
+    const unseeded = (await (await query(data, '{ newsServerStatus { placesSeeded } }')).json()) as any;
+    assert.equal(unseeded.data.newsServerStatus.placesSeeded, false);
+  });
+
   it('rejects a document the real schema rejects', async () => {
     const res = await query(data, 'query($ids: [ID!]!){ articlesForStories(articleIds: $ids){ nothingHere } }', { ids: ['a1'] });
     assert.equal(res.status, 400);

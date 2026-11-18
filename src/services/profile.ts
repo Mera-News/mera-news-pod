@@ -1,6 +1,7 @@
 // The saved facts and their topics: read them, add and remove facts, and shape a fact's topics.
 // Every write goes through the client's own functions, so a fact added here is treated exactly like
 // one added in the app: its topics are generated, and a removed topic is never generated back.
+import type { DataServerInfo } from './status';
 import type { AddFactsResult, FactView, PodServices, RemoveFactsResult, TopicEditResult, TopicSource, TopicView, TopicsStatus } from '../plugin-api';
 
 type Fact = { id: string; statement: string; topicsStatus: string | null; createdAt: string; questionnaireAttribute?: string };
@@ -18,7 +19,7 @@ const SOURCES: Record<string, TopicSource> = { llm: 'generated', migration: 'gen
 const shown = (rows: TopicRow[]) => rows.filter((t) => t.pendingDeleteAt == null && t.status === 'active');
 
 
-export function createProfile(limits: () => Promise<string[]>): PodServices['profile'] {
+export function createProfile(server: () => Promise<DataServerInfo>): PodServices['profile'] {
   const byCreated = (a: Fact, b: Fact) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
 
   return {
@@ -89,7 +90,7 @@ export function createProfile(limits: () => Promise<string[]>): PodServices['pro
         const { savedFacts } = await commitFactChoices(fresh.map((statement) => ({ statement })));
         result.added.push(...savedFacts.map((f) => ({ id: f.id, statement: f.statement })));
       }
-      if (result.added.some((a) => isHomeEntry({ statement: a.statement })) && (await limits()).includes('place lookup')) {
+      if (result.added.some((a) => isHomeEntry({ statement: a.statement })) && (await server().then((d) => d.limits.includes('place lookup') || d.placesNotLoaded))) {
         result.localCoverageWeaker = true;
       }
       return result;

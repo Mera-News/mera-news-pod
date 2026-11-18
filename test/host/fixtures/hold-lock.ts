@@ -1,9 +1,8 @@
 // Takes the lock, says so, and holds it until the process ends. It also ends when the test that
-// started it goes away (its stdin closes) or after a minute, so a failed run leaves no holder.
+// started it goes away (the IPC channel disconnects) or after a minute, so a failed run leaves no holder.
 import { acquireLock } from '../../../src/host/lock';
 
-process.stdin.on('end', () => process.exit(0));
-process.stdin.resume();
+process.on('disconnect', () => process.exit(0));
 setTimeout(() => process.exit(0), 60_000);
 
 try {

@@ -9,7 +9,7 @@ import { acquireLock } from '../../src/host/lock';
 const fixture = path.join(__dirname, 'fixtures', 'hold-lock.ts');
 
 function child(lockFile: string): { proc: ChildProcess; first: Promise<string> } {
-  const proc = spawn(process.execPath, ['--import', 'tsx', fixture, lockFile], { stdio: ['pipe', 'pipe', 'inherit'] });
+  const proc = spawn(process.execPath, ['--import', 'tsx', fixture, lockFile], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'] });
   const first = new Promise<string>((resolve, reject) => {
     proc.stdout!.once('data', (d) => resolve(String(d).trim()));
     // 'close' comes after the child's output is read, so a child that reports and exits is not lost.

@@ -6,7 +6,15 @@ You reach the pod through plugins. The first one lets an MCP client set up your 
 
 The pod gets its news from a Mera News data server you run, and uses any AI service with an OpenAI-compatible API, including one on your own machine. Your profile stays on the machine that runs the pod. The AI service you choose sees your profile and the articles it scores.
 
-This project is in development. Setup and usage docs will follow here.
+This project is in development.
+
+## Docs
+
+- [Running your own pod](docs/self-hosting.md): install, set up, check, start, keep it running, update, back up.
+- [Connecting a client](docs/clients.md): the MCP plugin, the token, and setups for Claude Code, Claude Desktop, claude.ai and ChatGPT.
+- [Privacy](docs/privacy.md): where information goes.
+- [Choosing a model](docs/models.md) and [changing the prompts](docs/harness.md).
+- [Limits](docs/limits.md): why a read can find nothing, and what a data server may lack.
 
 ## License
 

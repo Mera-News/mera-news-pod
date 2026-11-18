@@ -76,7 +76,7 @@ describe('fake data server', () => {
   const query = (server: FakeDataServer, q: string, variables?: unknown, headers?: Record<string, string>) =>
     post(server.graphqlUrl, { query: q, variables }, headers);
 
-  it('serves the four operations from the real schema', async () => {
+  it('serves the persona, hydrate, count and headline operations from the real schema', async () => {
     const persona = (await (await query(data, 'query($q: PersonaQueryInput!){ articleIdsForPersona(query: $q){ topicResults { topicText articleIds } headlineResults { scope articleIds } } }', {
       q: { limitPerTopic: 1, topics: [{ text: 'Formula  1' }], topHeadlines: { limitPerScope: 5, scopes: [{ scope: 'COUNTRY', countryCode: 'nl' }] } },
     })).json()) as any;
@@ -93,11 +93,42 @@ describe('fake data server', () => {
     assert.equal(top.data.topHeadlinesForCountry.headlines[0].article._id, 'a2');
   });
 
+  it('serves followed stories, cluster memberships, publishers and windowed headlines', async () => {
+    const stories = (await (await query(data, 'query($ids: [ID!]!){ articlesForStories(articleIds: $ids){ dailyLimitReached articles { _id } } }', { ids: ['a1', 'zz'] })).json()) as any;
+    assert.deepEqual(stories.data.articlesForStories, { dailyLimitReached: false, articles: [{ _id: 'a1' }] });
+
+    const memberships = (await (await query(data, 'query($ids: [ID!]!){ clusterMembershipsForArticles(articleIds: $ids){ articleId clusters { stableClusterId } } }', { ids: ['a2', 'zz'] })).json()) as any;
+    assert.deepEqual(memberships.data.clusterMembershipsForArticles, [{ articleId: 'a2', clusters: [{ stableClusterId: 'stable-a2' }] }]);
+
+    const search = (await (await query(data, '{ searchPublishers(query: "pub a1"){ publishers { _id name matchingSources { feed_url last_fetch_error } } } }')).json()) as any;
+    const [hit] = search.data.searchPublishers.publishers;
+    assert.equal(hit.name, 'Pub a1');
+    // As the public server sends them: an address is origin plus path, and no fetch error.
+    assert.deepEqual(hit.matchingSources, [{ feed_url: 'https://example.com/feeds/pub-a1.xml', last_fetch_error: null }]);
+    const sources = (await (await query(data, 'query($id: ID!){ publicationSourcesForNewsPublisher(publisherId: $id){ publicationSources { publication_name } } }', { id: hit._id })).json()) as any;
+    assert.deepEqual(sources.data.publicationSourcesForNewsPublisher.publicationSources, [{ publication_name: 'Pub a1' }]);
+
+    const windowed = (await (await query(data, '{ topHeadlinesForCountry(countryCode: "GLOBAL", windowHours: 6){ headlines { article { _id } } } }')).json()) as any;
+    assert.equal(windowed.data.topHeadlinesForCountry.headlines.length, 2);
+    const bad = (await (await query(data, '{ topHeadlinesForCountry(windowHours: 5){ headlines { stableClusterId } } }')).json()) as any;
+    assert.equal(bad.errors[0].extensions.code, 'BAD_WINDOW');
+  });
+
   it('rejects a document the real schema rejects', async () => {
-    const res = await query(data, 'query($ids: [ID!]!){ articlesForStories(articleIds: $ids){ articles { _id } } }', { ids: ['a1'] });
+    const res = await query(data, 'query($ids: [ID!]!){ articlesForStories(articleIds: $ids){ nothingHere } }', { ids: ['a1'] });
     assert.equal(res.status, 400);
     assert.equal(((await res.json()) as any).errors[0].extensions.code, 'GRAPHQL_VALIDATION_FAILED');
   });
+
+  it('refuses a query over the public server\'s limits, and counts no introspection', async () => {
+    const fields = (n: number) => Array.from({ length: n }, (_, i) => `f${i}: __typename`).join(' ');
+    assert.equal((await query(data, `{ ${fields(1000)} }`)).status, 200);
+    const res = await query(data, `{ ${fields(1001)} }`);
+    assert.equal(res.status, 400);
+    assert.equal(((await res.json()) as any).errors[0].extensions.code, 'QUERY_TOO_COMPLEX');
+    assert.equal((await query(data, `{ ${fields(1000)} __type(name: "Query") { name } }`)).status, 200);
+  });
+
 
   it('answers 501 for a real operation it does not serve', async () => {
     const res = await query(data, '{ allCountries }');

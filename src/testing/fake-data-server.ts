@@ -1,7 +1,20 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { buildSchema, defaultFieldResolver, execute, GraphQLError, parse, validate, type GraphQLSchema } from 'graphql';
+import {
+  buildSchema,
+  defaultFieldResolver,
+  execute,
+  GraphQLError,
+  Kind,
+  parse,
+  specifiedRules,
+  validate,
+  type ASTVisitor,
+  type GraphQLSchema,
+  type SelectionSetNode,
+  type ValidationContext,
+} from 'graphql';
 import { readBody, record, sendJson, type RecordedRequest } from './recorder';
 
 /** One article as the server serves it. Only `_id` and `title` are required, the rest is filled in. */
@@ -77,6 +90,29 @@ const asNewsArticle = (a: FakeArticle, now: string) => {
   };
 };
 
+const slug = (name: string) => norm(name).replace(/[^a-z0-9]+/g, '-');
+
+/** A publication as the public server sends it: addresses are origin plus path, and no fetch error. */
+const asSource = (name: string, country: string | null, now: string) => ({
+  _id: `source-${slug(name)}`,
+  newsPublisherId: `publisher-${slug(name)}`,
+  publication_name: name,
+  feed_url: `https://example.com/feeds/${slug(name)}.xml`,
+  publication_url: `https://example.com/${slug(name)}`,
+  country_code: country ?? 'XX',
+  country_name: null,
+  category: 'general',
+  categories: null,
+  type: 'rss',
+  gated: false,
+  is_active: true,
+  last_fetch_error: null,
+  createdAt: now,
+  updatedAt: now,
+});
+
+const WINDOWS = [6, 12, 24, 48];
+
 function resolversFor(options: FakeDataServerOptions) {
   const { articles, topics } = options;
   const now = new Date().toISOString();
@@ -85,6 +121,23 @@ function resolversFor(options: FakeDataServerOptions) {
     articles.filter((a) => !code || (a.country_code ?? '').toUpperCase() === code.toUpperCase());
   const headlineIds = (scope: string, code: string | null | undefined, limit: number) =>
     (scope === 'COUNTRY' ? byCountry(code).filter((a) => served.includes(a)) : served).slice(0, limit).map((a) => a._id);
+  const hydrate = (articleIds: string[]) => ({
+    articles: articleIds.flatMap((id) => {
+      const found = articles.find((a) => a._id === id);
+      return found ? [withDefaults(found, now)] : [];
+    }),
+    dailyLimitReached: false,
+    resetAt: null,
+  });
+  // One publisher with one source per publication name the articles carry.
+  const sources = () => {
+    const byName = new Map<string, ReturnType<typeof asSource>>();
+    for (const a of articles) {
+      const full = withDefaults(a, now);
+      if (!byName.has(full.publication_name)) byName.set(full.publication_name, asSource(full.publication_name, full.country_code, now));
+    }
+    return [...byName.values()];
+  };
 
   return {
     articleIdsForPersona: ({ query }: { query: PersonaQuery }) => ({
@@ -113,24 +166,68 @@ function resolversFor(options: FakeDataServerOptions) {
         };
       }),
     }),
-    articlesForTopicsByIds: ({ articleIds }: { articleIds: string[] }) => ({
-      articles: articleIds.flatMap((id) => {
+    articlesForTopicsByIds: ({ articleIds }: { articleIds: string[] }) => hydrate(articleIds),
+    articlesForStories: ({ articleIds }: { articleIds: string[] }) => hydrate(articleIds),
+    // An unknown id is left out, as the server leaves out one whose links are mid-swap.
+    clusterMembershipsForArticles: ({ articleIds }: { articleIds: string[] }) =>
+      articleIds.flatMap((id) => {
         const found = articles.find((a) => a._id === id);
-        return found ? [withDefaults(found, now)] : [];
+        return found ? [{ articleId: id, clusters: withDefaults(found, now).clusters }] : [];
       }),
-      dailyLimitReached: false,
-      resetAt: null,
+    publicationSourcesForNewsPublisher: ({ publisherId }: { publisherId: string }) => ({
+      publicationSources: sources().filter((src) => src.newsPublisherId === publisherId),
     }),
+    searchPublishers: ({ query, first }: { query: string; first: number }) => {
+      const hits = sources()
+        .filter((src) => norm(src.publication_name).includes(norm(query)))
+        .slice(0, first)
+        .map((src) => ({ _id: src.newsPublisherId, name: src.publication_name, country_code: src.country_code, country_name: null, website_url: src.publication_url, subscription_uri: null, matchingSources: [src] }));
+      return { publishers: hits, pageInfo: { endCursor: null, hasNextPage: false, pageSize: hits.length } };
+    },
     recentArticleCount: ({ since }: { since?: string | null }) =>
       articles.filter((a) => !since || Date.parse(a.pubDate ?? now) >= Date.parse(since)).length,
-    topHeadlinesForCountry: ({ countryCode, first }: { countryCode?: string | null; first: number }) => {
-      const picked = byCountry(countryCode).filter((a) => served.includes(a)).slice(0, first).map((a) => asNewsArticle(a, now));
+    topHeadlinesForCountry: ({ countryCode, first, windowHours }: { countryCode?: string | null; first: number; windowHours: number }) => {
+      if (!WINDOWS.includes(windowHours)) throw new GraphQLError(`windowHours must be one of ${WINDOWS.join(', ')}`, { extensions: { code: 'BAD_WINDOW' } });
+      const code = countryCode?.toUpperCase() === 'GLOBAL' ? null : countryCode;
+      const picked = byCountry(code).filter((a) => served.includes(a)).slice(0, first).map((a) => asNewsArticle(a, now));
       return {
         articles: picked,
         headlines: picked.map((article) => ({ article, clusterSize: 1, stableClusterId: `stable-${article._id}` })),
         editionBuiltAt: now,
         pageInfo: { endCursor: null, hasNextPage: false, pageSize: picked.length },
       };
+    },
+  };
+}
+
+// The public server's limit, so a client document it would refuse is refused here too: depth and
+// field count follow fragments, and introspection is never counted.
+const MAX_DEPTH = 12;
+const MAX_FIELDS = 1000;
+function queryLimits(context: ValidationContext): ASTVisitor {
+  return {
+    OperationDefinition(operation) {
+      let fields = 0;
+      let failure: string | null = null;
+      const walk = (set: SelectionSetNode, depth: number, spreading: string[]) => {
+        for (const sel of set.selections) {
+          if (failure) return;
+          if (sel.kind === Kind.FIELD) {
+            if (sel.name.value === '__schema' || sel.name.value === '__type') continue;
+            fields += 1;
+            if (fields > MAX_FIELDS) failure = `Query selects more than the limit of ${MAX_FIELDS} fields`;
+            else if (depth + 1 > MAX_DEPTH) failure = `Query is nested deeper than the limit of ${MAX_DEPTH} levels`;
+            else if (sel.selectionSet) walk(sel.selectionSet, depth + 1, spreading);
+          } else if (sel.kind === Kind.INLINE_FRAGMENT) {
+            walk(sel.selectionSet, depth, spreading);
+          } else if (!spreading.includes(sel.name.value)) {
+            const fragment = context.getFragment(sel.name.value);
+            if (fragment) walk(fragment.selectionSet, depth, [...spreading, sel.name.value]);
+          }
+        }
+      };
+      walk(operation.selectionSet, 0, []);
+      if (failure) context.reportError(new GraphQLError(failure, { nodes: operation, extensions: { code: 'QUERY_TOO_COMPLEX' } }));
     },
   };
 }
@@ -180,7 +277,9 @@ export async function startFakeDataServer(options: FakeDataServerOptions): Promi
     } catch (err) {
       return fail(400, 'GRAPHQL_PARSE_FAILED', (err as Error).message);
     }
-    const invalid = validate(schema, document);
+    const invalid = validate(schema, document, [...specifiedRules, queryLimits]);
+    const tooComplex = invalid.find((e) => e.extensions?.code === 'QUERY_TOO_COMPLEX');
+    if (tooComplex) return fail(400, 'QUERY_TOO_COMPLEX', tooComplex.message);
     if (invalid.length > 0) return fail(400, 'GRAPHQL_VALIDATION_FAILED', invalid.map((e) => e.message).join('; '));
     const result = await execute({
       schema,

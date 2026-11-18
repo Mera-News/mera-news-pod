@@ -9,13 +9,13 @@ const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`)
 
 /** Shown when the data server will not say what it offers: what a self-hosted server may lack. */
 export const ALL_LIMITS = ['followed stories', 'place lookup', 'story grouping refresh', 'windowed headlines', 'world headlines'];
-// The query that serves each feature, so a server that lacks the query lacks the feature.
-const FEATURE_QUERIES: Record<string, string> = {
-  'followed stories': 'articlesForStories',
-  'place lookup': 'placeSearch',
-  'story grouping refresh': 'clusterMembershipsForArticles',
-  'windowed headlines': 'topHeadlinesForCountry',
-  'world headlines': 'worldHeadlines',
+// The query, and where it matters the argument, that serves each feature: a server without it lacks the feature.
+const FEATURE_QUERIES: Record<string, [query: string, arg?: string]> = {
+  'followed stories': ['articlesForStories'],
+  'place lookup': ['placeSearch'],
+  'story grouping refresh': ['clusterMembershipsForArticles'],
+  'windowed headlines': ['topHeadlinesForCountry', 'windowHours'],
+  'world headlines': ['worldHeadlines'],
 };
 
 /** One question to the data server at start: which queries it answers. Any refusal gives the full list. */
@@ -24,13 +24,17 @@ export async function fetchLimits(cfg: LoadedConfig): Promise<string[]> {
     const res = await fetch(cfg.dataServer.graphqlUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(cfg.dataServer.apiKey ? { 'x-api-key': cfg.dataServer.apiKey } : {}) },
-      body: JSON.stringify({ query: '{ __type(name: "Query") { fields { name } } }' }),
+      body: JSON.stringify({ query: '{ __type(name: "Query") { fields { name args { name } } } }' }),
       signal: AbortSignal.timeout(15_000),
     });
-    const body = (await res.json()) as { data?: { __type?: { fields?: { name: string }[] } } };
-    const names = body.data?.__type?.fields?.map((f) => f.name);
-    if (!res.ok || !names) return ALL_LIMITS;
-    return ALL_LIMITS.filter((feature) => !names.includes(FEATURE_QUERIES[feature]));
+    const body = (await res.json()) as { data?: { __type?: { fields?: { name: string; args?: { name: string }[] }[] } } };
+    const fields = body.data?.__type?.fields;
+    if (!res.ok || !fields) return ALL_LIMITS;
+    const has = ([query, arg]: [string, string?]) => {
+      const field = fields.find((f) => f.name === query);
+      return !!field && (!arg || (field.args ?? []).some((a) => a.name === arg));
+    };
+    return ALL_LIMITS.filter((feature) => !has(FEATURE_QUERIES[feature]));
   } catch {
     return ALL_LIMITS;
   }

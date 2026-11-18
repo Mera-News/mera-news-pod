@@ -9,7 +9,7 @@ process.on('disconnect', () => process.exit(0));
 
 const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
 const noServices: PodServices = {
-  profile: { get: async () => ({ facts: [] }), addFacts: async () => ({ added: [], already: [], refused: [] }), removeFacts: async () => ({ removed: [], notFound: [] }), editTopics: async () => ({ results: [] }), hasProfile: async () => false, replaceProfile: async () => {} },
+  profile: { get: async () => ({ facts: [] }), addFacts: async () => ({ added: [], already: [], refused: [] }), removeFacts: async () => ({ removed: [], notFound: [] }), editTopics: async () => ({ results: [] }) },
   suggestions: { get: async () => ({ state: 'ok', hint: '', nextReadAt: null, picks: [], cursor: '', more: false }) },
   reading: { status: async () => ({}) as never, set: async () => ({}) as never, readNow: async () => 'ran' },
   commands: { run: async () => ({ results: [], snapshot: { schemaVersion: 0, registry: 0, tables: {} } }) },

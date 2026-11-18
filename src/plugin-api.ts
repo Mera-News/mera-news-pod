@@ -153,16 +153,6 @@ export interface PodServices {
     addFacts(statements: string[]): Promise<AddFactsResult>;
     removeFacts(ids: string[]): Promise<RemoveFactsResult>;
     editTopics(edit: TopicEdit): Promise<TopicEditResult>;
-    /** Contract version 2 and later. True when the pod holds at least one fact. */
-    hasProfile(): Promise<boolean>;
-    /**
-     * Contract version 2 and later. Replaces the pod's whole profile with the given rows (the tables
-     * a snapshot serves for facts, topics, places, preferences, followed and saved stories), clears
-     * the feed so no pick made for the old profile is delivered, and starts a read. It destroys the
-     * pod's profile: a plugin offers it only where the person chose it. The sync plugin allows it
-     * only for the first device paired.
-     */
-    replaceProfile(profile: { schemaVersion: number; tables: Record<string, { rows?: Record<string, unknown>[] }> }): Promise<void>;
   };
   suggestions: {
     /**

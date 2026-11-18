@@ -2,6 +2,7 @@
 // Every write goes through the client's own functions, so a fact added here is treated exactly like
 // one added in the app: its topics are generated, and a removed topic is never generated back.
 import type { AddFactsResult, FactView, PodServices, RemoveFactsResult, TopicEditResult, TopicSource, TopicView, TopicsStatus } from '../plugin-api';
+import { VersionMismatch } from './commands';
 import { PodError } from './ledger';
 
 type Fact = { id: string; statement: string; topicsStatus: string | null; createdAt: string; questionnaireAttribute?: string };
@@ -18,11 +19,6 @@ const CONFLICT_NEXT = 'remove the fact it conflicts with first, or reword this o
 const SOURCES: Record<string, TopicSource> = { llm: 'generated', migration: 'generated', exploration: 'generated', combo: 'generated', user: 'added', feedback: 'added', tracked: 'followed' };
 const shown = (rows: TopicRow[]) => rows.filter((t) => t.pendingDeleteAt == null && t.status === 'active');
 
-// The tables a pairing replaces: everything a person's profile is made of.
-const PROFILE_TABLES = [
-  'facts', 'topics', 'declined_topics', 'persona_suppressions', 'locations', 'persona_summary_strings', 'persona_change_log',
-  'publication_preferences', 'user_publication_subscriptions', 'tracked_stories', 'saved_article_suggestions',
-] as const;
 
 export function createProfile(limits: () => Promise<string[]>): PodServices['profile'] {
   const byCreated = (a: Fact, b: Fact) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
@@ -34,10 +30,9 @@ export function createProfile(limits: () => Promise<string[]>): PodServices['pro
 
     async replaceProfile({ schemaVersion, tables }) {
       const { default: schema } = client<{ default: { version: number } }>('database/schema');
-      if (schemaVersion !== schema.version) {
-        const which = Number(schemaVersion) < schema.version ? 'phone' : 'server';
-        throw new PodError('schema_mismatch', `The ${which} is on an older version than the other side.`, `update the ${which}`);
-      }
+      if (schemaVersion !== schema.version) throw new VersionMismatch(Number(schemaVersion) < schema.version ? 'phone' : 'pod');
+      // The client's own list, so the tables a pairing replaces are the ones a phone sends.
+      const { PROFILE_TABLES } = client<{ PROFILE_TABLES: readonly string[] }>('sync/tables');
       const given: Record<string, { hash: string; mode: 'replace'; rows: Record<string, unknown>[] }> = {};
       for (const name of PROFILE_TABLES) {
         const rows = tables?.[name]?.rows;

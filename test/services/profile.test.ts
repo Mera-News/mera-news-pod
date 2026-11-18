@@ -332,7 +332,9 @@ test('replaceProfile on another schema version, or with a table missing or a rep
       assert.ok(reply.error, 'refused');
       return reply.error!;
     };
-    assert.equal((await refused({ schemaVersion: snapshot.schemaVersion - 1, tables: snapshot.tables })).code, 'schema_mismatch');
+    const older = await refused({ schemaVersion: snapshot.schemaVersion - 1, tables: snapshot.tables });
+    assert.equal(older.code, 'version_mismatch');
+    assert.match(older.message, /The phone is older than the pod/);
     const { topics, ...missing } = snapshot.tables;
     assert.equal((await refused({ schemaVersion: snapshot.schemaVersion, tables: missing })).code, 'bad_profile');
     const twice = { ...snapshot.tables, facts: { ...snapshot.tables.facts, rows: [snapshot.tables.facts.rows[0], snapshot.tables.facts.rows[0]] } };

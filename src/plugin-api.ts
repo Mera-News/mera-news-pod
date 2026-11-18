@@ -229,10 +229,21 @@ export interface Logger {
 
 export type PodEvent = 'picks' | 'profile' | 'status';
 
-export interface PluginContext {
-  /** The contract version the plugin named. */
-  podApi: PodApiVersion;
-  services: PodServices;
+/** Exactly what a plugin speaking version 1 is given. */
+export interface PodServicesV1 {
+  profile: Pick<PodServices['profile'], 'get' | 'addFacts' | 'removeFacts' | 'editTopics'>;
+  suggestions: PodServices['suggestions'];
+  reading: Pick<PodServices['reading'], 'status' | 'set'>;
+  model: PodServices['model'];
+  news: PodServices['news'];
+}
+
+/** What a plugin is given, by the version it named: `ctx.podApi` tells a plugin which it has. */
+export type PluginContext =
+  | (PluginContextBase & { podApi: 1; services: PodServicesV1 })
+  | (PluginContextBase & { podApi: 2; services: PodServices });
+
+interface PluginContextBase {
   /** The plugin's own section of pod.json, as written. */
   config: unknown;
   /** A directory only this plugin writes, inside the pod's data directory. */

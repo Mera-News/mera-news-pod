@@ -1,5 +1,5 @@
 // Runs the pod with its real services in its own process, and answers commands from the test over
-// the IPC channel. It ends when that channel closes or after three minutes.
+// the IPC channel. It ends when that channel closes, which also happens when the test process dies.
 import { boot, type Pod } from '../../../src/boot';
 import { installProcessHandlers } from '../../../src/process';
 import type { PodServices } from '../../../src/plugin-api';
@@ -7,7 +7,6 @@ import { createServices } from '../../../src/services';
 
 const send = (message: unknown, done?: () => void) => process.send?.(message, undefined, undefined, () => done?.());
 process.on('disconnect', () => process.exit(0));
-setTimeout(() => process.exit(0), 180_000).unref();
 
 const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
 type Row = {
@@ -93,8 +92,14 @@ async function main() {
       switch (msg.cmd) {
         case 'call': {
           const [group, name] = String(msg.arg.fn).split('.');
+          const args = (msg.arg.args ?? []) as any[];
+          // A function cannot cross the channel: `fitsChars` stands for a caller whose replies hold that many characters of picks.
+          if (args[0]?.fitsChars) {
+            const { fitsChars, ...rest } = args[0];
+            args[0] = { ...rest, fits: (picks: unknown[]) => JSON.stringify(picks).length <= fitsChars };
+          }
           try {
-            return reply({ ok: await (services as any)[group][name](...(msg.arg.args ?? [])) });
+            return reply({ ok: await (services as any)[group][name](...args) });
           } catch (error) {
             const e = error as Error & { code?: string; next?: string };
             return reply({ error: { message: e.message, code: e.code, next: e.next } });

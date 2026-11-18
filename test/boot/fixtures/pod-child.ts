@@ -1,12 +1,11 @@
 // Runs the pod in its own process so a test can start, stop and kill it. It answers commands from
-// the test over the IPC channel, and it ends when that channel closes or after two minutes.
+// the test over the IPC channel, and it ends when that channel closes, as it does when the test dies.
 import { boot, type Pod } from '../../../src/boot';
 import { installProcessHandlers } from '../../../src/process';
 import type { PodServices } from '../../../src/plugin-api';
 
 const send = (message: unknown, done?: () => void) => process.send?.(message, undefined, undefined, () => done?.());
 process.on('disconnect', () => process.exit(0));
-setTimeout(() => process.exit(0), 120_000).unref();
 
 const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
 const noServices: PodServices = {

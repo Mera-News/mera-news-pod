@@ -43,10 +43,12 @@ async function main() {
     const end = { heap: await pod.ask('heap'), rows: await pod.ask('rowCount', 'article_suggestions') };
     const state = await pod.ask('state');
     const operations: Record<string, number> = {};
+    const unlabelled: string[] = [];
     for (const line of pod.logs) {
       if (!line.startsWith('[error]')) continue;
       const operation = /"operation":"([^"]+)"/.exec(line)?.[1] ?? 'other';
       operations[operation] = (operations[operation] ?? 0) + 1;
+      if (operation === 'other') unlabelled.push(line.slice(0, 300));
     }
 
     console.log('--- soak result');
@@ -55,6 +57,7 @@ async function main() {
     console.log(`overlapping runs: ${progress.overlap}`);
     console.log(`unhandled rejections: ${state.rejections}`);
     console.log(`errors per operation: ${JSON.stringify(operations)}`);
+    unlabelled.forEach((line) => console.log(`  other: ${line}`));
     console.log(`heap at run ${FIRST}: ${(atFirst!.heap / 1e6).toFixed(1)} MB, at run ${progress.runs}: ${(end.heap / 1e6).toFixed(1)} MB`);
     console.log(`stored articles at run ${FIRST}: ${atFirst!.rows}, at the end: ${end.rows}`);
 

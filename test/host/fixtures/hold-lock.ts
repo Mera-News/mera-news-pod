@@ -6,7 +6,9 @@ process.on('disconnect', () => process.exit(0));
 setTimeout(() => process.exit(0), 60_000);
 
 try {
-  acquireLock(process.argv[2]);
+  // Kept reachable: a lock nothing refers to can be collected, and collecting it closes the
+  // connection and drops the lock while this process still runs.
+  (globalThis as { held?: unknown }).held = acquireLock(process.argv[2]);
   console.log('held');
 } catch (error) {
   process.stdout.write(`refused: ${(error as Error).message}\n`, () => process.exit(0));

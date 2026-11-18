@@ -43,6 +43,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+      # The two-process lock test again and again: one pod per home rests on it.
+      - name: Lock test, repeated
+        env:
+          LOCK_RUNS: 50
+        run: for i in $(seq 1 "$LOCK_RUNS"); do npx tsx --test test/host/lock.test.ts > /dev/null || { echo "lock test failed on run $i"; exit 1; }; done; echo "lock test passed $LOCK_RUNS runs"
 
   licenses:
     runs-on: ubuntu-latest

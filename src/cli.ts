@@ -104,7 +104,9 @@ async function start(home: string): Promise<number> {
   }
   const pod = await boot({ home, createServices });
   installProcessHandlers({ log: (line) => console.error(pod.redact(line)), shutdown: pod.stop });
-  console.log(`The pod is running and reads every ${pod.control.get().everyMinutes} minutes.${pod.control.get().paused ? ' Reading is paused.' : ''}`);
+  const seconds = Number(process.env.MERA_POD_INTERVAL_SECONDS);
+  const every = seconds > 0 ? `${seconds} seconds (MERA_POD_INTERVAL_SECONDS)` : `${pod.control.get().everyMinutes} minutes`;
+  console.log(`The pod is running and reads every ${every}.${pod.control.get().paused ? ' Reading is paused.' : ''}`);
   return -1;
 }
 

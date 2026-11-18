@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { buildSchema, defaultFieldResolver, execute, GraphQLError, parse, validate, type GraphQLSchema } from 'graphql';
@@ -27,6 +27,8 @@ export interface FakeDataServerOptions {
   articles: FakeArticle[];
   /** Topic text (lower case, single spaces) to the ids it matches, in order. */
   topics: Record<string, string[]>;
+  /** Ids served as top headlines, in order. Unset: every article. */
+  headlines?: string[];
 }
 
 export interface FakeDataServer {
@@ -37,21 +39,21 @@ export interface FakeDataServer {
   close(): Promise<void>;
 }
 
-const PUB_DATE = '2026-01-01T00:00:00.000Z';
 const norm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
 
 export const defaultSchemaPath = (): string =>
   process.env.MERA_DATA_SERVER_SCHEMA ??
   `${process.cwd()}/../mera-news-data-server/apps/mera-server-news-api/src/schema.gql`;
 
-const withDefaults = (a: FakeArticle) => ({
+// An article without a pubDate is as new as the server: the client hides articles older than a few days.
+const withDefaults = (a: FakeArticle, now: string) => ({
   article_url: `https://example.com/${a._id}`,
   title_en: a.title,
   description_en: `Details of ${a._id}`,
   country_code: null,
   publication_name: `Pub ${a._id}`,
   language_code: 'en',
-  pubDate: PUB_DATE,
+  pubDate: now,
   story_key: null,
   clusters: [{ clusterId: `c-${a._id}`, confidence: 0.9, stableClusterId: `stable-${a._id}` }],
   maxClusterSize: 1,
@@ -61,8 +63,8 @@ const withDefaults = (a: FakeArticle) => ({
 });
 
 /** The same article in the shape of the server's plain article type. */
-const asNewsArticle = (a: FakeArticle) => {
-  const full = withDefaults(a);
+const asNewsArticle = (a: FakeArticle, now: string) => {
+  const full = withDefaults(a, now);
   return {
     ...full,
     description: full.description_en,
@@ -77,10 +79,12 @@ const asNewsArticle = (a: FakeArticle) => {
 
 function resolversFor(options: FakeDataServerOptions) {
   const { articles, topics } = options;
+  const now = new Date().toISOString();
+  const served = options.headlines ? options.headlines.flatMap((id) => articles.filter((a) => a._id === id)) : articles;
   const byCountry = (code?: string | null) =>
     articles.filter((a) => !code || (a.country_code ?? '').toUpperCase() === code.toUpperCase());
   const headlineIds = (scope: string, code: string | null | undefined, limit: number) =>
-    (scope === 'COUNTRY' ? byCountry(code) : articles).slice(0, limit).map((a) => a._id);
+    (scope === 'COUNTRY' ? byCountry(code).filter((a) => served.includes(a)) : served).slice(0, limit).map((a) => a._id);
 
   return {
     articleIdsForPersona: ({ query }: { query: PersonaQuery }) => ({
@@ -112,19 +116,19 @@ function resolversFor(options: FakeDataServerOptions) {
     articlesForTopicsByIds: ({ articleIds }: { articleIds: string[] }) => ({
       articles: articleIds.flatMap((id) => {
         const found = articles.find((a) => a._id === id);
-        return found ? [withDefaults(found)] : [];
+        return found ? [withDefaults(found, now)] : [];
       }),
       dailyLimitReached: false,
       resetAt: null,
     }),
     recentArticleCount: ({ since }: { since?: string | null }) =>
-      articles.filter((a) => !since || Date.parse(a.pubDate ?? PUB_DATE) >= Date.parse(since)).length,
+      articles.filter((a) => !since || Date.parse(a.pubDate ?? now) >= Date.parse(since)).length,
     topHeadlinesForCountry: ({ countryCode, first }: { countryCode?: string | null; first: number }) => {
-      const picked = byCountry(countryCode).slice(0, first).map(asNewsArticle);
+      const picked = byCountry(countryCode).filter((a) => served.includes(a)).slice(0, first).map((a) => asNewsArticle(a, now));
       return {
         articles: picked,
         headlines: picked.map((article) => ({ article, clusterSize: 1, stableClusterId: `stable-${article._id}` })),
-        editionBuiltAt: PUB_DATE,
+        editionBuiltAt: now,
         pageInfo: { endCursor: null, hasNextPage: false, pageSize: picked.length },
       };
     },
@@ -138,6 +142,11 @@ interface PersonaQuery {
 }
 
 export async function startFakeDataServer(options: FakeDataServerOptions): Promise<FakeDataServer> {
+  if (!existsSync(options.schemaPath)) {
+    throw new Error(
+      `There is no data server schema at ${options.schemaPath}. Set MERA_DATA_SERVER_SCHEMA to the schema.gql of mera-news-data-server (apps/mera-server-news-api/src/schema.gql), or check that repository out next to this one.`,
+    );
+  }
   const schema: GraphQLSchema = buildSchema(readFileSync(options.schemaPath, 'utf8'));
   const rootValue = resolversFor(options);
   const requests: RecordedRequest[] = [];

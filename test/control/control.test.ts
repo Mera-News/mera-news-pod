@@ -21,6 +21,9 @@ test('paused: no request reaches the data server or the model, from the triggers
     assert.deepEqual(await pod.first, { ready: true });
     await pod.ask('pause');
     assert.ok(await until(async () => (await pod.ask('state')).reading === 'paused', 15_000), 'the first read finished');
+    // A request sent just before the pause can still be on its way to a fake: let it land, so what is
+    // counted below is only what the pod sends while paused.
+    await sleep(1_000);
     const before = reached(w);
 
     const job = await pod.ask('plant');
@@ -49,6 +52,11 @@ test('reading is pausing while a run is in flight and paused once it ends', asyn
     const pod = startPod(w.home);
     assert.deepEqual(await pod.first, { ready: true });
     assert.equal((await pod.ask('state')).reading, 'on');
+    // The fixture's article is new, so a real read runs at start: let it end first, since its end
+    // clears the run this test plants.
+    await pod.ask('pause');
+    assert.ok(await until(async () => (await pod.ask('state')).reading === 'paused', 15_000), 'the read at start ended');
+    await pod.ask('resume');
     await pod.ask('hold', true);
     await pod.ask('pause');
     assert.equal((await pod.ask('state')).reading, 'pausing');

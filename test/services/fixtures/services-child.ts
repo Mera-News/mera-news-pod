@@ -1,0 +1,162 @@
+// Runs the pod with its real services in its own process, and answers commands from the test over
+// the IPC channel. It ends when that channel closes or after three minutes.
+import { boot, type Pod } from '../../../src/boot';
+import { installProcessHandlers } from '../../../src/process';
+import type { PodServices } from '../../../src/plugin-api';
+import { createServices } from '../../../src/services';
+
+const send = (message: unknown, done?: () => void) => process.send?.(message, undefined, undefined, () => done?.());
+process.on('disconnect', () => process.exit(0));
+setTimeout(() => process.exit(0), 180_000).unref();
+
+const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
+type Row = {
+  id: string;
+  status?: string;
+  relevance?: number;
+  reason?: string;
+  title?: string;
+  titleOriginal?: string;
+  url?: string;
+  lang?: string;
+  publishedHoursAgo?: number;
+  cluster?: string;
+  factIds?: string[];
+};
+type Db = { get(t: string): any; write<T>(fn: () => Promise<T>): Promise<T>; batch(...ops: unknown[]): Promise<void> };
+
+async function plantRows(rows: Row[]) {
+  const { default: database } = client<{ default: Db }>('database/index');
+  const col = database.get('article_suggestions');
+  const links = database.get('article_suggestion_facts');
+  const now = new Date();
+  await database.write(async () => {
+    const ops: unknown[] = [];
+    for (const row of rows) {
+      ops.push(
+        col.prepareCreate((r: any) => {
+          r._raw.id = row.id;
+          r.articleId = row.id;
+          r.clusterMembershipsJson = row.cluster ? JSON.stringify([{ clusterId: row.cluster, confidence: 0.95, stableClusterId: row.cluster }]) : null;
+          r.relevance = row.relevance ?? 0.9;
+          r.reason = row.reason ?? `Why ${row.id} matters to you.`;
+          r.status = row.status ?? 'complete';
+          r.languageCode = row.lang ?? 'en';
+          r.publicationName = `Paper ${row.id}`;
+          // Made-up words per id, because the Feed shows headlines that share most words as one story.
+          // Ids that share a part (`old-a`, `old-b`) give such headlines.
+          r.titleEn = row.title ?? `Zxq${row.id} vorpal${row.id} glimmer${row.id}`;
+          r.titleOriginal = row.titleOriginal ?? row.title ?? `Zxq${row.id} vorpal${row.id} glimmer${row.id}`;
+          r.descriptionEn = `ARTICLE BODY ${row.id}`;
+          r.articleUrl = row.url ?? `https://example.com/${row.id}`;
+          r.matchedTopicTextsJson = '[]';
+          r.rawScore = row.relevance ?? 0.9;
+          r.scoredAt = Date.now();
+          r.createdAt = now;
+          r.firstPubDate = new Date(Date.now() - (row.publishedHoursAgo ?? 1) * 3_600_000);
+        }),
+      );
+      for (const factId of row.factIds ?? []) {
+        ops.push(links.prepareCreate((r: any) => { r.articleSuggestionId = row.id; r.factId = factId; r.createdAt = now; }));
+      }
+    }
+    await database.batch(...ops);
+  });
+}
+
+async function main() {
+  let pod: Pod;
+  let services!: PodServices;
+  try {
+    pod = await boot({
+      sink: (_level, line) => send({ log: line }),
+      createServices: (context) => {
+        const made = createServices(context);
+        services = made.services;
+        return made;
+      },
+    });
+  } catch (error) {
+    send({ error: (error as Error).message }, () => process.exit(1));
+    return;
+  }
+  const handlers = installProcessHandlers({
+    log: (line) => send({ log: line }),
+    shutdown: pod.stop,
+    exit: (code) => send({ exit: code }, () => process.exit(code)),
+  });
+  send({ ready: true });
+
+  process.on('message', async (msg: { id: number; cmd: string; arg?: any }) => {
+    const reply = (value: unknown) => send({ id: msg.id, value });
+    try {
+      switch (msg.cmd) {
+        case 'call': {
+          const [group, name] = String(msg.arg.fn).split('.');
+          try {
+            return reply({ ok: await (services as any)[group][name](...(msg.arg.args ?? [])) });
+          } catch (error) {
+            const e = error as Error & { code?: string; next?: string };
+            return reply({ error: { message: e.message, code: e.code, next: e.next } });
+          }
+        }
+        case 'plant': await plantRows(msg.arg); return reply(null);
+        case 'patchRow': {
+          const { default: database } = client<{ default: Db }>('database/index');
+          const row = await database.get('article_suggestions').find(msg.arg.id);
+          await database.write(() => row.update((r: any) => Object.assign(r, msg.arg.patch)));
+          return reply(null);
+        }
+        case 'deleteRow': {
+          const { default: database } = client<{ default: Db }>('database/index');
+          const row = await database.get('article_suggestions').find(msg.arg);
+          await database.write(() => row.destroyPermanently());
+          return reply(null);
+        }
+        case 'plantFact': { // a fact with the given topics status and topics, without any model call
+          const { addFact } = client<{ addFact(s: string, m?: object, q?: object, o?: object): Promise<{ id: string }> }>('database/services/fact-service');
+          const { createTopics } = client<{ createTopics(i: object[]): Promise<{ id: string }[]> }>('database/services/topic-service');
+          const fact = await addFact(msg.arg.statement, undefined, undefined, { topicsStatus: msg.arg.status });
+          const topics = await createTopics((msg.arg.topics ?? []).map((t: { text: string; provenance?: string }) => ({ factId: fact.id, text: t.text, weight: 1, provenance: t.provenance ?? 'llm' })));
+          return reply({ id: fact.id, topicIds: topics.map((t) => t.id) });
+        }
+        case 'lastRun': // makes the reading task look as if it finished a run just now
+          client<{ useSchedulerStore: { getState(): { loadLastRunTimes(t: object): void } } }>('scheduler/scheduler-store').useSchedulerStore.getState().loadLastRunTimes({ 'feed-sync': msg.arg ?? Date.now() });
+          return reply(null);
+        case 'state': return reply({ ...pod.control.get(), reading: pod.control.readingState(), rejections: handlers.rejections() });
+        case 'trigger': return reply(await client<{ AppScheduler: { trigger(n: string): Promise<string> } }>('scheduler/AppScheduler').AppScheduler.trigger('feed-sync'));
+        case 'lastTrigger': // when the pod itself last asked for a read; the schedule's own runs do not set it
+          return reply(client<{ AppScheduler: { lastTriggerAt: Map<string, number> } }>('scheduler/AppScheduler').AppScheduler.lastTriggerAt.get('feed-sync') ?? null);
+        case 'regenerate': { // asks for a fresh round of topics for a fact, as the app's retry does
+          const { getFacts } = client<{ getFacts(): Promise<{ id: string; statement: string }[]> }>('database/services/fact-service');
+          const { retryTopicGeneration } = client<{ retryTopicGeneration(id: string, s: string): Promise<void> }>('chat-tools/tool-handlers');
+          const fact = (await getFacts()).find((f) => f.id === msg.arg)!;
+          await retryTopicGeneration(fact.id, fact.statement);
+          return reply(null);
+        }
+        case 'heap': global.gc?.(); return reply(process.memoryUsage().heapUsed);
+        case 'rowCount': {
+          const { default: database } = client<{ default: Db }>('database/index');
+          return reply(await database.get(msg.arg).query().fetchCount());
+        }
+        case 'overlap': return reply({ overlap, runs });
+        case 'stop': await pod.stop(); return send({ id: msg.id, value: null }, () => process.exit(0));
+      }
+    } catch (error) {
+      reply({ crashed: (error as Error).message });
+    }
+  });
+
+  // Counts finished feed-sync runs, and any that starts while another is still going.
+  let overlap = 0;
+  let runs = 0;
+  const { useSchedulerStore } = client<{ useSchedulerStore: { subscribe(fn: (s: any, prev: any) => void): void } }>('scheduler/scheduler-store');
+  useSchedulerStore.subscribe((state, prev) => {
+    if (state.taskLastRun['feed-sync'] !== prev.taskLastRun['feed-sync']) runs++;
+    if (state.runningCount > 1 && state.runningCount > prev.runningCount) {
+      const running = Object.values(state.jobs as Record<string, { taskName: string; status: string }>).filter((j) => j.taskName === 'feed-sync' && j.status === 'running');
+      if (running.length > 1) overlap++;
+    }
+  });
+}
+void main();

@@ -10,6 +10,7 @@ import { boot } from './boot';
 import { ConfigError, loadConfig, podHome, type LoadedConfig } from './config';
 import { installProcessHandlers } from './process';
 import { loadPlugins, unavailableServices } from './plugins';
+import { createServices } from './services';
 
 const PROBE_TIMEOUT_MS = 15_000;
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -101,7 +102,7 @@ async function start(home: string): Promise<number> {
     problems.forEach((line) => console.error(line));
     return 1;
   }
-  const pod = await boot({ home });
+  const pod = await boot({ home, createServices });
   installProcessHandlers({ log: (line) => console.error(pod.redact(line)), shutdown: pod.stop });
   console.log(`The pod is running and reads every ${pod.control.get().everyMinutes} minutes.${pod.control.get().paused ? ' Reading is paused.' : ''}`);
   return -1;

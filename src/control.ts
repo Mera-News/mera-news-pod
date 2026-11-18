@@ -14,6 +14,8 @@ export interface ControlFile {
   paused: boolean;
   everyMinutes: number;
   notifiedSeq: number;
+  /** The pick history the notifier position belongs to; null while no notifier is on. */
+  notifyEpoch: string | null;
 }
 
 // Each client module is typed here as the part this file calls, and loaded only when it is called,
@@ -47,7 +49,7 @@ function readFile(file: string, fallback: ControlFile): ControlFile {
 
 export function createControl(cfg: LoadedConfig, env: NodeJS.ProcessEnv = process.env) {
   const file = cfg.paths.controlFile;
-  const state = readFile(file, { paused: false, everyMinutes: cfg.reading.everyMinutes, notifiedSeq: 0 });
+  const state = readFile(file, { paused: false, everyMinutes: cfg.reading.everyMinutes, notifiedSeq: 0, notifyEpoch: null });
   // For tests only: the read interval in seconds, so a test need not wait minutes.
   const testSeconds = Number(env.MERA_POD_INTERVAL_SECONDS) || 0;
 
@@ -89,6 +91,12 @@ export function createControl(cfg: LoadedConfig, env: NodeJS.ProcessEnv = proces
       applyEvery();
     },
     setNotifiedSeq(seq: number) {
+      state.notifiedSeq = seq;
+      save();
+    },
+    /** Where a notifier starts: the history it belongs to and the last pick it counts as sent. */
+    setNotifyPosition(epoch: string | null, seq: number) {
+      state.notifyEpoch = epoch;
       state.notifiedSeq = seq;
       save();
     },

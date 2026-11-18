@@ -146,6 +146,12 @@ async function main() {
         }
         case 'overlap': return reply({ overlap, runs });
         case 'stop': await pod.stop(); return send({ id: msg.id, value: null }, () => process.exit(0));
+        // Stops the pod and answers how many timers are still alive, then exits.
+        case 'stopAndCountTimers': {
+          await pod.stop();
+          const timers = (process as unknown as { getActiveResourcesInfo(): string[] }).getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+          return send({ id: msg.id, value: timers }, () => process.exit(0));
+        }
       }
     } catch (error) {
       reply({ crashed: (error as Error).message });

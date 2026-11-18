@@ -12,6 +12,12 @@ const isVersions = (v: unknown): v is { schemaVersion: number; registry: number 
 
 export function createDisplayService(): PodServices['display'] {
   return {
+    versions() {
+      return {
+        schemaVersion: client<{ default: { version: number } }>('database/schema').default.version,
+        registry: client<{ COMMAND_REGISTRY_VERSION: number }>('sync/command').COMMAND_REGISTRY_VERSION,
+      };
+    },
     async snapshot(options = {}) {
       const { hashes = {}, peer } = options;
       if (!isHashes(hashes)) throw new PodError('bad_request', 'hashes must map table names to hash strings.', 'pass the hashes you hold, or none');

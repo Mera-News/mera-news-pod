@@ -122,10 +122,24 @@ exports.createPlugin = (ctx) => ({
     const pod = startServicesPod(w.home);
     assert.deepEqual(await pod.first, { ready: true });
     const peek = JSON.parse(fs.readFileSync(path.join(w.home, 'data', 'plugins', 'peek', 'peek.json'), 'utf8'));
-    assert.deepEqual(peek, { display: ['snapshot'], events: ['on'], tables: SYNC_TABLES.length });
+    assert.deepEqual(peek, { display: ['versions', 'snapshot'], events: ['on'], tables: SYNC_TABLES.length });
     // A paused pod still serves snapshots.
     await ok(pod, 'reading.set', { paused: true });
     assert.equal((await snapshot(pod)).tables.facts.hash.length, 64);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('versions answers the schema and registry versions a snapshot carries, without reading a table', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    const versions = await ok(pod, 'display.versions');
+    const snapshot = await ok(pod, 'display.snapshot', {});
+    assert.deepEqual(versions, { schemaVersion: snapshot.schemaVersion, registry: snapshot.registry });
     await pod.ask('stop');
   } finally {
     await w.close();

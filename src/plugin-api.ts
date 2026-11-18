@@ -206,6 +206,8 @@ export interface PodServices {
      * message says which side is older.
      */
     snapshot(options?: { hashes?: Record<string, string>; peer?: { schemaVersion: number; registry: number } }): Promise<Snapshot>;
+    /** The schema and command registry versions this pod runs, without reading any table. */
+    versions(): { schemaVersion: number; registry: number };
   };
   /** Contract version 2 and later. */
   events: {

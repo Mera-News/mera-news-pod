@@ -19,7 +19,7 @@ export const unavailableServices: PodServices = {
   commands: { run: unavailable },
   model: { chatCompletions: unavailable },
   news: { graphql: unavailable },
-  display: { snapshot: unavailable },
+  display: { snapshot: unavailable, versions: () => ({ schemaVersion: 0, registry: 0 }) },
   events: { on: () => () => {} },
 };
 

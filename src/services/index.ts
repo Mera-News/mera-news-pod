@@ -137,6 +137,10 @@ export function createServices(context: ServicesContext): { services: PodService
       changes.stop();
       stopTopics();
       stopStories();
+      // A paired phone's mute and topic delete leave timers in the client; a stopped pod keeps none.
+      const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
+      client<{ cancelPendingPurges(): void }>('database/services/publication-pref-ui-actions').cancelPendingPurges();
+      client<{ cancelPendingDeletes(): void }>('database/services/topic-decline-service').cancelPendingDeletes();
     },
   };
 }

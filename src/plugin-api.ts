@@ -116,8 +116,12 @@ export interface PodServices {
     editTopics(edit: TopicEdit): Promise<TopicEditResult>;
   };
   suggestions: {
-    /** `since`: a cursor, 'all' to replay, or absent for "after the last pick delivered". */
-    get(options: { since?: string; limit: number }): Promise<SuggestionsReply>;
+    /**
+     * `since`: a cursor, 'all' to replay, or absent for "after the last pick delivered". `fits`: a
+     * caller with a size limit says whether a page of picks fits; the page is cut until it does (never
+     * below one pick), and only the picks returned count as delivered, so a cut loses none.
+     */
+    get(options: { since?: string; limit: number; fits?: (picks: PickView[]) => boolean }): Promise<SuggestionsReply>;
   };
   reading: {
     status(): Promise<PodStatus>;

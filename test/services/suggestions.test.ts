@@ -142,6 +142,31 @@ test('a reply with picks is ok even while more news is still being rated', async
   }
 });
 
+test('picks cut to fit a caller\'s size limit all arrive over successive calls, none twice', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('plantFact', { statement: 'Follows sailing', status: 'done', topics: [{ text: 'sailing races' }] });
+    const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf'];
+    await pod.ask('plant', names.map((id, i) => ({ id, publishedHoursAgo: 10 - i, reason: `${id} `.repeat(300).trim() })));
+    const seen: string[] = [];
+    const sizes: number[] = [];
+    for (let call = 0; call < names.length; call++) {
+      const reply = await ok(pod, 'suggestions.get', { limit: 10, fitsChars: 4500 });
+      seen.push(...reply.picks.map((p: any) => p.url.split('/').pop()));
+      sizes.push(reply.picks.length);
+      if (!reply.more) break;
+    }
+    assert.deepEqual([...seen].sort(), [...names].sort(), 'every pick arrived exactly once');
+    assert.ok(sizes.every((n) => n >= 1 && n <= 2), `pages cut to fit: ${sizes}`);
+    assert.deepEqual((await ok(pod, 'suggestions.get', { limit: 10 })).picks, [], 'nothing is left to deliver');
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
 test('two reports with nearly the same headline are one story, so they come back as one pick', async () => {
   const w = await world();
   try {

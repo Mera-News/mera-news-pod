@@ -38,8 +38,12 @@ export interface Tx {
    * else a new one. Ids whose row no longer exists are forgotten. Returns one number per story.
    */
   register(stories: readonly (readonly string[])[], liveIds: ReadonlySet<string>): number[];
-  /** The items after the cursor, oldest first. `since` is a cursor, 'all', or absent for "after the last delivered". */
-  take<T extends { seq: number }>(items: readonly T[], since: string | undefined, limit: number): Take<T>;
+  /**
+   * The items after the cursor, oldest first. `since` is a cursor, 'all', or absent for "after the
+   * last delivered". `fits` shortens the page to its longest start that fits, never below one item,
+   * so only what is returned counts as delivered.
+   */
+  take<T extends { seq: number }>(items: readonly T[], since: string | undefined, limit: number, fits?: (page: T[]) => boolean): Take<T>;
 }
 
 const CURSOR = /^([0-9a-f]+)\.(\d+)$/;
@@ -117,7 +121,7 @@ export function createLedger(file: string) {
       return seqs;
     },
 
-    take(items, since, limit) {
+    take(items, since, limit, fits) {
       let from: number;
       let reset = false;
       if (since === undefined) from = state.lastDelivered;
@@ -134,14 +138,15 @@ export function createLedger(file: string) {
         }
       }
       const later = items.filter((item) => item.seq > from).sort((a, b) => a.seq - b.seq);
-      const page = later.slice(0, limit);
+      let page = later.slice(0, limit);
+      while (fits && page.length > 1 && !fits(page)) page = page.slice(0, -1);
       const last = page.length ? page[page.length - 1].seq : from;
       // Delivered when the reply is returned: a reply that is lost on the way repeats, never skips.
       if (last > state.lastDelivered) {
         state.lastDelivered = last;
         dirty = true;
       }
-      return { items: page, cursor: `${state.epoch}.${last}`, more: later.length > limit, ...(reset ? { reset: true as const } : {}) };
+      return { items: page, cursor: `${state.epoch}.${last}`, more: later.length > page.length, ...(reset ? { reset: true as const } : {}) };
     },
   };
 

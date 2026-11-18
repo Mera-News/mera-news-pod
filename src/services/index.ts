@@ -64,14 +64,15 @@ export function createServices(context: ServicesContext): { services: PodService
     profile: createProfile(() => limits),
 
     suggestions: {
-      async get({ since, limit }) {
+      async get({ since, limit, fits }) {
         if (!Number.isInteger(limit) || limit < 1) throw new PodError('bad_limit', 'limit must be a whole number of at least 1.', 'pass a limit such as 10');
         const [snapshot, reply] = await Promise.all([
           takeSnapshot(snapshotInputs),
           ledger.run(async (tx) => {
             const { candidates, liveIds } = await readFeed();
             const seqs = tx.register(candidates.map((c) => c.memberIds), liveIds);
-            const taken = tx.take(candidates.map((c, i) => ({ seq: seqs[i], pick: c.pick })), since, limit);
+            const fitsPage = fits ? (page: { pick: PickView }[]) => fits(page.map((i) => i.pick)) : undefined;
+            const taken = tx.take(candidates.map((c, i) => ({ seq: seqs[i], pick: c.pick })), since, limit, fitsPage);
             return { ...taken, all: candidates.length };
           }),
         ]);

@@ -53,6 +53,22 @@ test('a page ends at the limit, says there is more, and the next read carries on
   assert.equal(rest.more, false);
 });
 
+test('a page cut to fit counts only what it returns as delivered, so every pick comes once', async () => {
+  const ledger = createLedger(temp());
+  const stories = [['a'], ['b'], ['c'], ['d'], ['e']];
+  const fitsTwo = (page: Item[]) => page.length <= 2;
+  const take = () => ledger.run((tx) => {
+    const seqs = tx.register(stories, new Set(stories.flat()));
+    return tx.take(seqs.map((seq, i): Item => ({ seq, id: stories[i][0] })), undefined, 10, fitsTwo);
+  });
+  const pages = [await take(), await take(), await take()];
+  assert.deepEqual(pages.map(ids), [['a', 'b'], ['c', 'd'], ['e']]);
+  assert.deepEqual(pages.map((p) => p.more), [true, true, false]);
+  // A page that cannot fit even one item still returns one, so a large pick never blocks the rest.
+  const big = await ledger.run((tx) => tx.take([{ seq: tx.register([['f']], new Set(['f']))[0], id: 'f' }], undefined, 10, () => false));
+  assert.deepEqual(ids(big), ['f']);
+});
+
 test("'all' replays every pick without moving what was delivered back", async () => {
   const ledger = createLedger(temp());
   const stories = [['a'], ['b']];

@@ -229,6 +229,24 @@ test('facts are paged by 50 with nextOffset until the last page', async () => {
   }
 });
 
+test('facts that were ready before a restart start no read of their own', async () => {
+  const w = await world();
+  try {
+    const first = startServicesPod(w.home);
+    assert.deepEqual(await first.first, { ready: true });
+    await first.ask('plantFact', { statement: 'Follows chess', status: 'done', topics: [{ text: 'chess' }] });
+    await until(() => first.ask('lastTrigger'), (t) => t !== null, 'the read for the new fact');
+    await first.ask('stop');
+    const second = startServicesPod(w.home);
+    assert.deepEqual(await second.first, { ready: true });
+    await new Promise((r) => setTimeout(r, 2000));
+    assert.equal(await second.ask('lastTrigger'), null, 'the restarted pod did not ask for a read');
+    await second.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
 test('a fact whose topics are ready starts a read at once, once, and not while reading is paused', async () => {
   const w = await world();
   try {

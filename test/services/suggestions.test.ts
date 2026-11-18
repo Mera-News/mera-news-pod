@@ -102,13 +102,12 @@ test('a failing read is a problem a person can fix, with the fix in the hint', a
 });
 
 test('an AI service that refuses the key is a problem the person fixes, and the hint names the setting', async () => {
-  const w = await world({ model: { status: 401 } });
+  // One article for the fact's topic: the read the fact starts fetches it and asks the model to rate it.
+  const w = await world({ model: { status: 401 }, articles: [{ _id: 'c1', title: 'Chess final goes to a tiebreak' }], topics: { chess: ['c1'] } });
   try {
     const pod = startServicesPod(w.home);
     assert.deepEqual(await pod.first, { ready: true });
     await pod.ask('plantFact', { statement: 'Follows chess', status: 'done', topics: [{ text: 'chess' }] });
-    await pod.ask('plant', [{ id: 'unrated', status: 'unscored', relevance: 0 }]);
-    await pod.ask('trigger');
     const status = await until(() => ok(pod, 'reading.status'), (s) => s.problems.some((p: any) => p.code === 'ai_key_refused'), 'the refused key');
     assert.ok(w.model.bodies.length > 0, 'the pod did ask the AI service');
     const problem = status.problems.find((p: any) => p.code === 'ai_key_refused');

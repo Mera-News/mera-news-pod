@@ -96,3 +96,25 @@ test('the pause and the schedule survive a restart, and an out of range schedule
     await w.close();
   }
 });
+
+test("a pause does not freeze the interval: pod.json's reading.everyMinutes still applies after a restart", async () => {
+  const w = await world();
+  try {
+    const first = startPod(w.home);
+    assert.deepEqual(await first.first, { ready: true });
+    await first.ask('pause');
+    await first.ask('resume');
+    await first.ask('stop');
+    assert.equal(await first.exited, 0);
+    assert.ok(fs.existsSync(path.join(w.home, 'data', 'control.json')), 'the pause wrote control.json');
+
+    const podJson = path.join(w.home, 'pod.json');
+    fs.writeFileSync(podJson, JSON.stringify({ ...JSON.parse(fs.readFileSync(podJson, 'utf8')), reading: { everyMinutes: 40 } }));
+    const second = startPod(w.home);
+    assert.deepEqual(await second.first, { ready: true });
+    assert.equal(await second.ask('frequency'), 40 * 60_000);
+    await second.ask('stop');
+  } finally {
+    await w.close();
+  }
+});

@@ -33,15 +33,15 @@ const queue = () => (require('mera-news-client/dist/lib/inference/InferenceQueue
 const deviceProcessing = () =>
   (require('mera-news-client/dist/lib/stores/for-you-store') as { useForYouStore: { getState(): { isDeviceProcessing: boolean } } }).useForYouStore.getState().isDeviceProcessing;
 
-function readFile(file: string, fallback: ControlFile): ControlFile {
+function readFile(file: string): Partial<ControlFile> {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
   } catch {
-    return fallback;
+    return {};
   }
   try {
-    return { ...fallback, ...(JSON.parse(text) as Partial<ControlFile>) };
+    return JSON.parse(text) as Partial<ControlFile>;
   } catch {
     throw new ConfigError(`${file} is not valid JSON. Fix it or delete it.`);
   }
@@ -49,14 +49,18 @@ function readFile(file: string, fallback: ControlFile): ControlFile {
 
 export function createControl(cfg: LoadedConfig, env: NodeJS.ProcessEnv = process.env) {
   const file = cfg.paths.controlFile;
-  const state = readFile(file, { paused: false, everyMinutes: cfg.reading.everyMinutes, notifiedSeq: 0, notifyEpoch: null });
+  const saved = readFile(file);
+  const state: ControlFile = { paused: false, everyMinutes: cfg.reading.everyMinutes, notifiedSeq: 0, notifyEpoch: null, ...saved };
+  // The interval is kept here only once it was set through the services: until then pod.json's
+  // reading.everyMinutes stays in charge, whatever else (a pause, a notifier) writes this file.
+  let everyChosen = saved.everyMinutes !== undefined;
   // For tests only: the read interval in seconds, so a test need not wait minutes.
   const testSeconds = Number(env.MERA_POD_INTERVAL_SECONDS) || 0;
 
   const save = () => {
     const tmp = `${file}.tmp`;
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
+    fs.writeFileSync(tmp, JSON.stringify(everyChosen ? state : { ...state, everyMinutes: undefined }), { mode: 0o600 });
     fs.renameSync(tmp, file);
   };
   // A pause stops every read and every model call the pod starts on its own: the reading tasks and
@@ -87,6 +91,7 @@ export function createControl(cfg: LoadedConfig, env: NodeJS.ProcessEnv = proces
         throw new Error(`everyMinutes must be a whole number between ${MIN_EVERY_MINUTES} and ${MAX_EVERY_MINUTES}.`);
       }
       state.everyMinutes = minutes;
+      everyChosen = true;
       save();
       applyEvery();
     },

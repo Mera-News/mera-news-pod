@@ -159,3 +159,13 @@ export interface PodPlugin {
 
 /** What a plugin module exports as `createPlugin`. Plugins are trusted code with the pod's access. */
 export type CreatePlugin = (context: PluginContext) => PodPlugin | Promise<PodPlugin>;
+
+/**
+ * What a plugin module exports. `name` is short, lower case, digits and dashes, unique among the
+ * pod's plugins; it names the plugin's data directory (`<data>/plugins/<name>`).
+ */
+export interface PluginModule {
+  podApi: typeof POD_API;
+  name: string;
+  createPlugin: CreatePlugin;
+}

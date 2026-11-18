@@ -28,6 +28,8 @@ export interface FakeModel {
 export interface FakeModelOptions {
   responder?: (body: ChatRequestBody) => string | Promise<string>;
   delayMs?: number;
+  /** Answer every chat request with this HTTP status instead, as an endpoint that refuses the key does with 401. */
+  status?: number;
 }
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -79,6 +81,7 @@ export async function startFakeModel(options: FakeModelOptions = {}): Promise<Fa
     if (!body || typeof body !== 'object' || !Array.isArray(body.messages)) return fail(400, 'body has no messages array');
     if (body.stream) return fail(400, 'streaming is not supported');
     bodies.push(body);
+    if (options.status) return fail(options.status, `refused with ${options.status}`);
     if (options.delayMs) await new Promise((r) => setTimeout(r, options.delayMs));
     let content: string;
     try {

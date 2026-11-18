@@ -54,7 +54,10 @@ export function createNodeHost(cfg: LoadedConfig, deps: HostDeps) {
   const appState = createLifecycle();
 
   const origins = [cfg.dataServer.origin, cfg.ai.origin, cfg.notify.ntfy?.origin, cfg.notify.webhook?.origin].filter((o): o is string => !!o);
-  const fetch = guardedFetch(origins, (line) => sink('warning', redact(line)));
+  // The last answer from each server: 401 or 403 from the AI service or the data server means the
+  // key is wrong, which only the person can fix.
+  const lastStatus = new Map<string, number>();
+  const fetch = guardedFetch(origins, (line) => sink('warning', redact(line)), (origin, status) => lastStatus.set(origin, status));
 
   const auth = {
     getJwtToken: async () => 'local',
@@ -103,6 +106,8 @@ export function createNodeHost(cfg: LoadedConfig, deps: HostDeps) {
   assertHostShape(host);
 
   const guards = {
+    /** True while the latest answer from `origin` refused the request's credentials. */
+    refusedBy: (origin: string) => [401, 403].includes(lastStatus.get(origin) ?? 0),
     appState,
     redact,
     installGlobalFetch: () => installGlobalFetch(fetch),

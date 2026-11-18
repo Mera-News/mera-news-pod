@@ -25,6 +25,8 @@ export interface ServicesContext {
   cfg: LoadedConfig;
   control: Control;
   log(level: Level, line: string): void;
+  /** True while the AI service or the data server refuses the configured key. */
+  keyRefused(server: 'ai' | 'data'): boolean;
 }
 
 export interface Pod {
@@ -155,7 +157,7 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
     const everyMs = Number(env.MERA_POD_INTERVAL_SECONDS) * 1000 || undefined;
     guards.appState.startCycle(everyMs, () => control.get().paused);
     cleanups.push(() => guards.appState.stop());
-    const made = options.createServices?.({ cfg, control, log });
+    const made = options.createServices?.({ cfg, control, log, keyRefused: (server) => guards.refusedBy(server === 'ai' ? cfg.ai.origin : cfg.dataServer.origin) });
     if (made?.stop) cleanups.push(() => made.stop!());
     const plugins = await loadPlugins(cfg, {
       services: made?.services ?? unavailableServices,

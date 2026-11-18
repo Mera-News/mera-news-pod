@@ -14,9 +14,12 @@ export function acquireLock(file: string): { release(): void } {
     }
     throw error;
   }
+  // Our own flag: DatabaseSync.isOpen is missing on the oldest Node the pod supports.
+  let held = true;
   return {
     release() {
-      if (!db.isOpen) return;
+      if (!held) return;
+      held = false;
       db.exec('rollback');
       db.close();
     },

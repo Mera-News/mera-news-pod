@@ -12,6 +12,7 @@ This project is in development.
 
 - [Running your own pod](docs/self-hosting.md): install, set up, check, start, keep it running, update, back up.
 - [Connecting a client](docs/clients.md): the MCP plugin, the token, and setups for Claude Code, Claude Desktop, claude.ai and ChatGPT.
+- [Pairing the Mera News app](docs/sync.md): pairing, HTTPS, several phones, what a phone can do.
 - [Privacy](docs/privacy.md): where information goes.
 - [Choosing a model](docs/models.md) and [changing the prompts](docs/harness.md).
 - [Limits](docs/limits.md): why a read can find nothing, and what a data server may lack.

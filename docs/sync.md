@@ -54,7 +54,7 @@ Add `--home <folder>` when the pod does not use the default home. It prints a co
 
 The code has 10 characters, works once and lasts 10 minutes. After 10 wrong codes in all, or 5 tries in one minute, pairing stops until you print a new code.
 
-**Pairing erases the phone's own data.** The app warns you first. After pairing, the phone shows only what the pod holds. Nothing from the phone is merged into the pod, and a phone's profile cannot be moved to a pod yet. If the pod has no profile, add facts from the app or through an assistant.
+**Pairing erases the phone's own data.** The app warns you first. It keeps only your sign-in, your display choices, tutorial progress and backup settings; your chats on the phone are erased too. After pairing, the phone shows only what the pod holds. Nothing from the phone is merged into the pod, and a phone's profile cannot be moved to a pod yet. If the pod has no profile, add facts from the app or through an assistant.
 
 ## Change or remove the paired phone
 

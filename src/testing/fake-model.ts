@@ -79,7 +79,6 @@ export async function startFakeModel(options: FakeModelOptions = {}): Promise<Fa
     if (entry.method !== 'POST') return fail(405, `unsupported method ${entry.method}`);
     const body = entry.body as ChatRequestBody | null;
     if (!body || typeof body !== 'object' || !Array.isArray(body.messages)) return fail(400, 'body has no messages array');
-    if (body.stream) return fail(400, 'streaming is not supported');
     bodies.push(body);
     if (options.status) return fail(options.status, `refused with ${options.status}`);
     if (options.delayMs) await new Promise((r) => setTimeout(r, options.delayMs));
@@ -88,6 +87,15 @@ export async function startFakeModel(options: FakeModelOptions = {}): Promise<Fa
       content = await responder(body);
     } catch (err) {
       return fail(500, err instanceof Error ? err.message : String(err));
+    }
+    if (body.stream) {
+      // The reply in a few deltas, as an OpenAI-compatible server streams it.
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      const parts = content.match(/[\s\S]{1,16}/g) ?? [''];
+      for (const part of parts) res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: part }, finish_reason: null }] })}\n\n`);
+      res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`);
+      res.end('data: [DONE]\n\n');
+      return;
     }
     sendJson(res, 200, {
       id: 'chatcmpl-fake',

@@ -36,6 +36,19 @@ describe('fake model', () => {
     assert.equal((await ask([{ role: 'user', content: 'hello' }])).choices[0].message.content, 'ok');
   });
 
+  it('streams the same reply as server-sent events when asked to stream', async () => {
+    const messages = [{ role: 'user', content: 'Fact: "Follows Formula 1 racing"' }];
+    const whole = (await ask(messages)).choices[0].message.content as string;
+    const res = await post(`${model.baseUrl}/chat/completions`, { model: 'm', messages, stream: true });
+    assert.match(res.headers.get('content-type') ?? '', /text\/event-stream/);
+    const lines = (await res.text()).split('\n').filter((l) => l.startsWith('data: '));
+    assert.equal(lines.at(-1), 'data: [DONE]');
+    const chunks = lines.slice(0, -1).map((l) => JSON.parse(l.slice(6)).choices[0]);
+    assert.ok(chunks.length > 2, 'more than one delta');
+    assert.equal(chunks.map((c) => c.delta.content ?? '').join(''), whole);
+    assert.equal(chunks.at(-1).finish_reason, 'stop');
+  });
+
   it('makes an unknown path visible', async () => {
     const res = await post(`${model.origin}/v1/other`, {});
     assert.equal(res.status, 404);

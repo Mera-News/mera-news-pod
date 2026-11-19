@@ -4,5 +4,5 @@
   "private": true,
   "description": "The SQLite driver WatermelonDB loads under Node: the node:sqlite driver that mera-news-client ships.",
   "main": "index.js",
-  "license": "AGPL-3.0-only"
+  "license": "SEE LICENSE IN LICENSE"
 }

@@ -66,9 +66,10 @@ jobs:
         run: bash .github/scripts/with-deploy-keys.sh mera-news-client=CLIENT_DEPLOY_KEY -- npm ci
       # @nozbe/sqlite@3.46.0 (pulled in by WatermelonDB) declares no license field. It ships the
       # SQLite 3.46.0 amalgamation unchanged, and SQLite is in the public domain (the "blessing"
-      # header in sqlite3.c), so it is excluded by exact version.
+      # header in sqlite3.c), so it is excluded by exact version. mera-news-client is Mera's own,
+      # under the same licence as this repository, so it is excluded by name.
       - name: Production dependency licenses
         run: >
           npx --yes license-checker-rseidelsohn@4.4.2 --production --excludePrivatePackages
-          --excludePackages "@nozbe/sqlite@3.46.0"
-          --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;Zlib;(MIT AND Zlib);CC0-1.0;BlueOak-1.0.0;AGPL-3.0-only"
+          --excludePackages "@nozbe/sqlite@3.46.0;mera-news-client"
+          --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;Zlib;(MIT AND Zlib);CC0-1.0;BlueOak-1.0.0"

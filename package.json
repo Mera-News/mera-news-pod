@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Mera News on your own machine: it keeps your news profile and reads the news for you, and you reach it through plugins.",
-  "license": "AGPL-3.0-only",
+  "license": "SEE LICENSE IN LICENSE",
   "author": "Mera Labs B.V.",
   "engines": {
     "node": ">=22.13"

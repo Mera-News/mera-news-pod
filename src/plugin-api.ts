@@ -233,7 +233,12 @@ export interface PodServicesV1 {
 /** What a plugin is given, by the version it named: `ctx.podApi` tells a plugin which it has. */
 export type PluginContext =
   | (PluginContextBase & { podApi: 1; services: PodServicesV1 })
-  | (PluginContextBase & { podApi: 2; services: PodServices });
+  | (PluginContextBase & {
+      podApi: 2;
+      services: PodServices;
+      /** The one https origin the pod lets a plugin ask to wake a paired phone through (pod.json `wakeRelay`), or null when off. */
+      wakeRelay: string | null;
+    });
 
 interface PluginContextBase {
   /** The plugin's own section of pod.json, as written. */

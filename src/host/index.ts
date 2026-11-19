@@ -53,7 +53,7 @@ export function createNodeHost(cfg: LoadedConfig, deps: HostDeps) {
   const sentry = createTelemetry(redact, sink, deps.minLevel);
   const appState = createLifecycle();
 
-  const origins = [cfg.dataServer.origin, cfg.ai.origin, cfg.notify.ntfy?.origin, cfg.notify.webhook?.origin].filter((o): o is string => !!o);
+  const origins = allowedOrigins(cfg);
   // The last answer from each server: 401 or 403 from the AI service or the data server means the
   // key is wrong, which only the person can fix.
   const lastStatus = new Map<string, number>();
@@ -116,4 +116,9 @@ export function createNodeHost(cfg: LoadedConfig, deps: HostDeps) {
   };
 
   return { host, guards };
+}
+
+/** The origins the client's fetch may reach: what the config names, the wake relay included when set. */
+export function allowedOrigins(cfg: Pick<LoadedConfig, 'dataServer' | 'ai' | 'notify' | 'wakeRelay'>): string[] {
+  return [cfg.dataServer.origin, cfg.ai.origin, cfg.notify.ntfy?.origin, cfg.notify.webhook?.origin, cfg.wakeRelay?.origin].filter((o): o is string => !!o);
 }

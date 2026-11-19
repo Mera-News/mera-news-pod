@@ -7,7 +7,8 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { gql } from '@apollo/client';
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
-import { loadConfig } from '../../src/config';
+import { loadConfig, type LoadedConfig } from '../../src/config';
+import { allowedOrigins } from '../../src/host';
 import { createNodeHost } from '../../src/host';
 
 const dirs: string[] = [];
@@ -116,4 +117,10 @@ test('the database adapter opens an absolute mera.db in the data directory and w
   }
   assert.ok(fs.existsSync(cfg.paths.dbFile));
   assert.deepEqual(written, []);
+});
+
+test('the wake relay origin is allowed exactly when wakeRelay is set, and nothing else is added', () => {
+  const base = { dataServer: { origin: 'http://127.0.0.1:3002' }, ai: { origin: 'http://127.0.0.1:11434' }, notify: {} } as unknown as LoadedConfig;
+  assert.deepEqual(allowedOrigins({ ...base, wakeRelay: null }), ['http://127.0.0.1:3002', 'http://127.0.0.1:11434']);
+  assert.deepEqual(allowedOrigins({ ...base, wakeRelay: { origin: 'https://relay.example.org' } }), ['http://127.0.0.1:3002', 'http://127.0.0.1:11434', 'https://relay.example.org']);
 });

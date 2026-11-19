@@ -47,6 +47,7 @@ Edit `pod.json`:
 | `language`, `region` | Taken from your machine by `init`. Change them if they are wrong. |
 | `notify` | See [notifiers](#notifiers). |
 | `plugins` | The plugins to run, see [clients](clients.md). |
+| `wakeRelay` | The one https origin a plugin may use to wake your paired phone, such as `https://relay.example.org`. Off when absent or `false`. The pod reaches no other new address because of it. |
 
 Keys go in `secrets.json`, which must not be readable by other users (`chmod 600`):
 

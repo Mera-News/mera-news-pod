@@ -112,7 +112,7 @@ test('a plugin that cannot be found, has no createPlugin, names another API vers
 
 /** Loads plugin files straight through the plugin host with a counting stand-in for the services. */
 const fn = async () => undefined;
-async function hosted(files: Record<string, string>) {
+async function hosted(files: Record<string, string>, wakeRelay: string | null = null) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pod-plugins-'));
   const specs = Object.entries(files).map(([name, body]) => {
     const file = path.join(dir, `${name}.js`);
@@ -136,7 +136,7 @@ async function hosted(files: Record<string, string>) {
       },
     },
   } as unknown as PodServices;
-  const cfg = { plugins: specs, paths: { home: dir, pluginsDir: path.join(dir, 'plugins') } } as unknown as LoadedConfig;
+  const cfg = { plugins: specs, paths: { home: dir, pluginsDir: path.join(dir, 'plugins') }, wakeRelay: wakeRelay ? { origin: wakeRelay } : null } as unknown as LoadedConfig;
   const lines: string[] = [];
   const plugins = await loadPlugins(cfg, { services, write: (_l, line) => lines.push(line), podRoot: dir });
   return { plugins, subs, lines, dir };
@@ -170,6 +170,18 @@ test('a plugin speaking 1 gets exactly the members it had, one speaking 2 gets e
     events: ['on'],
   }]);
   await plugins.stop();
+});
+
+test('a plugin speaking 2 sees the wake relay origin, and one speaking 1 does not', async () => {
+  const { plugins } = await hosted({
+    one: body(1, 'one', `globalThis.__relay = { ...(globalThis.__relay || {}), one: 'wakeRelay' in ctx };`),
+    two: body(2, 'two', `globalThis.__relay = { ...(globalThis.__relay || {}), two: ctx.wakeRelay };`),
+  }, 'https://relay.example.org');
+  assert.deepEqual((globalThis as any).__relay, { one: false, two: 'https://relay.example.org' });
+  await plugins.stop();
+  const off = await hosted({ three: body(2, 'three', `globalThis.__relayOff = ctx.wakeRelay;`) });
+  assert.equal((globalThis as any).__relayOff, null);
+  await off.plugins.stop();
 });
 
 test('a plugin speaking another version is refused with both versions the pod speaks', async () => {

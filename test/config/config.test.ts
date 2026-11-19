@@ -59,3 +59,16 @@ test('plain errors for a missing file, a bad address and an interval out of rang
   assert.throws(() => loadConfig(home({ ...minimal, reading: { everyMinutes: 2 } }), {}), /between 5 and 1440/);
   assert.throws(() => loadConfig(home({ ...minimal, plugins: [{ package: '' }] }), {}), /plugins/);
 });
+
+test('wakeRelay must be an https origin, and anything else stops the load naming the key', () => {
+  assert.deepEqual(loadConfig(home({ ...minimal, wakeRelay: 'https://relay.example.org' }), {}).wakeRelay, { origin: 'https://relay.example.org' });
+  assert.deepEqual(loadConfig(home({ ...minimal, wakeRelay: 'https://relay.example.org/' }), {}).wakeRelay, { origin: 'https://relay.example.org' });
+  for (const bad of ['http://relay.example.org', 'https://relay.example.org/api', 'https://relay.example.org/?a=1', 'https://u:p@relay.example.org', 'https://relay.example.org/#x', 'not a url', true, 1, {}]) {
+    assert.throws(() => loadConfig(home({ ...minimal, wakeRelay: bad }), {}), (e: Error) => e instanceof ConfigError && /wakeRelay/.test(e.message), String(bad));
+  }
+});
+
+test('wakeRelay false and absent both mean off', () => {
+  assert.equal(loadConfig(home({ ...minimal, wakeRelay: false }), {}).wakeRelay, null);
+  assert.equal(loadConfig(home(minimal), {}).wakeRelay, null);
+});

@@ -22,6 +22,8 @@ export interface PodConfigFile {
   region?: string;
   notify?: { ntfy?: { enabled?: boolean; url?: string }; webhook?: { enabled?: boolean; url?: string } };
   plugins?: PluginEntry[];
+  /** The one https origin a plugin may ask to wake a paired phone through, or false. Absent means off. */
+  wakeRelay?: string | false;
 }
 
 /** secrets.json, mode 0600. */
@@ -55,6 +57,7 @@ export interface LoadedConfig {
   region?: string;
   notify: { ntfy?: { url: string; origin: string }; webhook?: { url: string; origin: string } };
   plugins: PluginEntry[];
+  wakeRelay: { origin: string } | null;
   /** Every secret value in use, so the logger can blank it out of anything it writes. */
   secrets: string[];
 }
@@ -109,6 +112,20 @@ function httpUrl(value: unknown, field: string): URL {
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new ConfigError(`${field} must be an http or https address.`);
   return url;
+}
+
+/** An https origin and nothing more: no path, query, fragment or credentials. */
+function httpsOrigin(value: unknown, field: string): string {
+  const fail = () => new ConfigError(`${field} must be an https origin, such as https://relay.example.org.`);
+  if (typeof value !== 'string') throw fail();
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw fail();
+  }
+  if (url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash || url.username || url.password) throw fail();
+  return url.origin;
 }
 
 function whole(value: number | undefined, fallback: number, min: number, max: number, field: string): number {
@@ -172,6 +189,7 @@ export function loadConfig(home: string, env: NodeJS.ProcessEnv = process.env): 
     region: file.region,
     notify: { ntfy: notifyTarget(file.notify?.ntfy, 'notify.ntfy'), webhook: notifyTarget(file.notify?.webhook, 'notify.webhook') },
     plugins,
+    wakeRelay: file.wakeRelay === undefined || file.wakeRelay === false ? null : { origin: httpsOrigin(file.wakeRelay, 'wakeRelay') },
     secrets: [aiApiKey, dataApiKey].filter((s): s is string => typeof s === 'string' && s.length > 0),
   };
 }

@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { LoadedConfig } from './config';
-import { POD_API, POD_API_VERSIONS, type CreatePlugin, type PodApiVersion, type Logger, type PodPlugin, type PodServices } from './plugin-api';
+import { POD_API, POD_API_VERSIONS, type CreatePlugin, type PluginContext, type PodApiVersion, type Logger, type PodPlugin, type PodServices } from './plugin-api';
 
 export class PluginError extends Error {}
 
@@ -106,7 +106,9 @@ export async function loadPlugins(cfg: LoadedConfig, deps: PluginDeps): Promise<
             },
           };
     try {
-      loaded.push({ spec, name, unlisten, plugin: await mod.createPlugin({ podApi, services, config: entry.config, dataDir, log, estimateTokens }) });
+      const base = { services, config: entry.config, dataDir, log, estimateTokens };
+      const ctx = podApi === 1 ? { podApi, ...base } : { podApi, ...base, wakeRelay: cfg.wakeRelay?.origin ?? null };
+      loaded.push({ spec, name, unlisten, plugin: await mod.createPlugin(ctx as PluginContext) });
     } catch (error) {
       throw fail(`did not start: ${oneLine(error)}`);
     }

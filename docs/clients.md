@@ -41,7 +41,7 @@ Every request needs a token. The pod never prints it. It is in `~/.mera-news-pod
 
 ## Which setups we have run
 
-The pod's own tests drive the plugin with an MCP client over HTTP and the bearer token, the way the Claude Code setup below connects, and run the stdio bridge against a test server. We have not yet run any of the client setups below ourselves. Each one follows that client's current documentation.
+The pod's own tests drive the plugin with an MCP client over Streamable HTTP and the bearer token, the way the Claude Code setup below connects, and run the stdio bridge against a test server. A client with the right token connects and lists the seven tools; a missing or wrong token gets 401. The client setups below follow each client's current documentation and have not been run against a pod yet.
 
 ## Claude Code
 
@@ -84,7 +84,7 @@ Use full paths: your own `node` (`which node` prints it) and your checkout. Add 
 
 ## A remote pod
 
-A connector in claude.ai or ChatGPT is called from the vendor's servers, so the pod must be reachable at a public HTTPS address that you provide, for example through your own tunnel. Tell the plugin that name:
+A connector in claude.ai is called from the vendor's servers, so the pod must be reachable at a public HTTPS address that you provide, for example through your own tunnel. Tell the plugin that name:
 
 ```json
 { "publicHost": "pod.example.com" }
@@ -96,7 +96,11 @@ Add a custom connector (Customize, then Connectors, then Add custom connector) w
 
 ### ChatGPT
 
-ChatGPT's custom MCP servers offer OAuth or no authentication, and no header, so the pod offers the capability address instead. Turn it on in the plugin's config:
+ChatGPT is not supported yet. It connects to custom servers with OAuth, and the pod offers no OAuth sign in.
+
+### The capability address
+
+For a client that can send neither a header nor OAuth, the plugin can serve the token as part of the address. Turn it on in the plugin's config:
 
 ```json
 { "capabilityUrl": true, "publicHost": "pod.example.com" }
@@ -108,9 +112,7 @@ Print the address in the `mera-news-pod-plugins` folder with:
 npx mera-news-pod-mcp url --base https://pod.example.com
 ```
 
-It looks like `https://pod.example.com/mcp/<token>`. Add it as a custom MCP server with no authentication. Your workspace settings may not allow custom servers.
-
-Anyone who holds that address can read your profile and change it, because the address is the token. That is why it is off by default. Keep it out of chat and screenshots, and run `npx mera-news-pod-mcp token --rotate` if it leaks. The pod offers no sign-in flow of its own.
+It looks like `https://pod.example.com/mcp/<token>`. Anyone who holds that address can read your profile and change it, because the address is the token. That is why it is off by default. Keep it out of chat and screenshots, and run `npx mera-news-pod-mcp token --rotate` if it leaks.
 
 ## What the assistant can do
 

@@ -81,6 +81,37 @@ The language, Skip notes, the 24-hour filter, the Explore choices and the topics
 
 The app's iCloud and Google Drive backups are off while the phone is paired, since the data is on the pod. Backing up the pod is up to you: stop it and copy its home folder, as in [back up](self-hosting.md#back-up).
 
+## Notifications on the phone
+
+The pod can show a new top story on the paired phone as a notification. Tapping it opens that story in the Mera News app. This is off unless you turn it on in `pod.json`:
+
+```json
+"notify": { "meraNewsApp": { "enabled": true, "url": "https://relay.example.org" } }
+```
+
+`url` is the address of the Mera sign-in service your Mera News app uses: `https://` and a host name, nothing after it. If it does not match, the Mera News app does not use the pod for notifications and shows the address it expects.
+
+Only Mera can send notifications to the Mera News app, so the pod sends each one through Mera's sign-in service. It serves only the Mera News app. If you build your own app, use [ntfy or the webhook](self-hosting.md#notifiers), or a plugin with your own push service: Mera relays nothing for other apps.
+
+The phone gives the pod a pass, which lasts at most 14 days, and the app renews it. When the pod finds a new story at the level `emergency` or `high`, it sends the pass, the story's headline and the story's id to Mera's sign-in service, which sends the phone one notification showing the headline.
+
+How often:
+
+- At most one notification every 15 minutes. Emergency stories go at once.
+- Each story is sent once. When Mera's service does not answer, the pod tries once more, so now and then a notification can arrive twice.
+- A headline with a web address in it is not sent.
+- Mera also limits each phone to 10 notifications an hour and 40 a day.
+
+What leaves the pod, for each notification:
+
+- Mera's sign-in service receives the headline, the story's id (the article id Mera's news data uses), which Mera account it is for (from the pass), and your pod's network address. It does not store or log the headline or the id. It keeps a count per phone for the limit, for at most two days.
+- Expo, and then Apple or Google, receive the headline and the story's id, addressed to your phone, and keep them under their own rules.
+- Nothing else is sent: no reason, facts, link or topic.
+
+The pass is a secret. It is kept in `push-pass.json` in the sync plugin's folder, readable only by you. Every plugin the pod runs, and every backup of the pod's home folder, holds a pass that works until it is revoked or expires. Starting the pod with this notifier off deletes the pass. Turning notifications off in the app, unpairing or signing out ends the pass at Mera when the phone is online.
+
+**A lost phone keeps getting notifications until you revoke it** with `mera-news-pod-sync devices --revoke <id>`, which deletes its pass at once.
+
 ## What the phone still sends to Mera
 
 While paired, the phone sends Mera only requests about your Mera News account: signing in, your subscription, notifications and feedback requests. Your profile, your feed and your chats go to your pod.

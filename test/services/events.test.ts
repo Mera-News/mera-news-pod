@@ -110,3 +110,77 @@ test('a paused pod fires nothing on its own, and still fires for a profile edit'
     await w.close();
   }
 });
+
+const fixedSentence = "A plugin's notify listener failed.";
+const podJsonPlugin = (w: World, file: string, extra: object = {}) => {
+  const config = JSON.parse(fs.readFileSync(path.join(w.home, 'pod.json'), 'utf8'));
+  fs.writeFileSync(path.join(w.home, 'pod.json'), JSON.stringify({ ...config, ...extra, plugins: [{ package: file }] }));
+};
+
+test('events: a notify listener never runs on a change, and a change listener never on notify', async () => {
+  const w = await world();
+  try {
+    const file = path.join(w.home, 'both.js');
+    const log = path.join(w.home, 'both.log');
+    fs.writeFileSync(
+      file,
+      `exports.podApi = 2; exports.name = 'both';
+exports.createPlugin = (ctx) => {
+  const add = (line) => require('node:fs').appendFileSync(${JSON.stringify(log)}, line + '\\n');
+  return {
+    start: async () => {
+      ctx.services.events.on('changed', () => add('changed'));
+      ctx.services.events.on('notify', (picks) => add('notify ' + (Array.isArray(picks) ? picks.length : 'none')));
+    },
+    stop: async () => {},
+  };
+};`,
+    );
+    podJsonPlugin(w, file);
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await until(() => ok(pod, 'reading.status'), (s) => s.firstReadDone && !s.readingNow, 'the read at start to end');
+    await plant(pod, 'one');
+    await sleep(3500);
+    const lines = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [];
+    assert.ok(lines.includes('changed'));
+    assert.deepEqual(lines.filter((l) => l.startsWith('notify')), []);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('events: a notify listener that rejects is logged as a fixed sentence and raises no unhandled rejection; a throwing one does not stop the next', async () => {
+  const w = await world();
+  try {
+    const file = path.join(w.home, 'bad.js');
+    const log = path.join(w.home, 'bad.log');
+    fs.writeFileSync(
+      file,
+      `exports.podApi = 2; exports.name = 'bad';
+exports.createPlugin = (ctx) => ({
+  start: async () => {
+    ctx.services.events.on('notify', () => Promise.reject(new Error('MARKER')));
+    ctx.services.events.on('notify', () => { throw new Error('MARKER'); });
+    ctx.services.events.on('notify', (picks) => require('node:fs').appendFileSync(${JSON.stringify(log)}, picks.length + '\\n'));
+  },
+  stop: async () => {},
+});`,
+    );
+    podJsonPlugin(w, file, { notify: { meraNewsApp: { enabled: true, url: 'https://relay.example.org' } } });
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await plant(pod, 'urgent');
+    await until(async () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').length : 0), (n) => n >= 1, 'the third listener to run');
+    await sleep(500);
+    const lines = pod.logs.filter((l) => l.includes(fixedSentence));
+    assert.equal(lines.length, 2);
+    assert.ok(lines.every((l) => l.trim().endsWith(fixedSentence)));
+    assert.doesNotMatch(pod.logs.join('\n'), /MARKER/);
+    assert.equal((await pod.ask('state')).reading, 'on');
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});

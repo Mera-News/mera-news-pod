@@ -118,7 +118,7 @@ export function createNodeHost(cfg: LoadedConfig, deps: HostDeps) {
   return { host, guards };
 }
 
-/** The origins the client's fetch may reach: what the config names, the wake relay included when set. */
-export function allowedOrigins(cfg: Pick<LoadedConfig, 'dataServer' | 'ai' | 'notify' | 'wakeRelay'>): string[] {
-  return [cfg.dataServer.origin, cfg.ai.origin, cfg.notify.ntfy?.origin, cfg.notify.webhook?.origin, cfg.wakeRelay?.origin].filter((o): o is string => !!o);
+/** The origins the client's fetch may reach: what the config names, the Mera News app notifier included when on. */
+export function allowedOrigins(cfg: Pick<LoadedConfig, 'dataServer' | 'ai' | 'notify'>): string[] {
+  return [cfg.dataServer.origin, cfg.ai.origin, cfg.notify.ntfy?.origin, cfg.notify.webhook?.origin, cfg.notify.meraNewsApp?.origin].filter((o): o is string => !!o);
 }

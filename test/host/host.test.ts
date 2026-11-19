@@ -119,8 +119,13 @@ test('the database adapter opens an absolute mera.db in the data directory and w
   assert.deepEqual(written, []);
 });
 
-test('the wake relay origin is allowed exactly when wakeRelay is set, and nothing else is added', () => {
-  const base = { dataServer: { origin: 'http://127.0.0.1:3002' }, ai: { origin: 'http://127.0.0.1:11434' }, notify: {} } as unknown as LoadedConfig;
-  assert.deepEqual(allowedOrigins({ ...base, wakeRelay: null }), ['http://127.0.0.1:3002', 'http://127.0.0.1:11434']);
-  assert.deepEqual(allowedOrigins({ ...base, wakeRelay: { origin: 'https://relay.example.org' } }), ['http://127.0.0.1:3002', 'http://127.0.0.1:11434', 'https://relay.example.org']);
+test('guard: the Mera News app origin is allowed when on, and nothing else is added', () => {
+  const base = { dataServer: { origin: 'http://127.0.0.1:3002' }, ai: { origin: 'http://127.0.0.1:11434' } };
+  const cfg = (notify: object) => ({ ...base, notify }) as unknown as LoadedConfig;
+  assert.deepEqual(allowedOrigins(cfg({})), ['http://127.0.0.1:3002', 'http://127.0.0.1:11434']);
+  assert.deepEqual(allowedOrigins(cfg({ meraNewsApp: { origin: 'https://relay.example.org' } })), ['http://127.0.0.1:3002', 'http://127.0.0.1:11434', 'https://relay.example.org']);
+  assert.deepEqual(
+    allowedOrigins(cfg({ ntfy: { origin: 'https://ntfy.example.org' }, webhook: { origin: 'https://hook.example.org' }, meraNewsApp: { origin: 'https://relay.example.org' } })),
+    ['http://127.0.0.1:3002', 'http://127.0.0.1:11434', 'https://ntfy.example.org', 'https://hook.example.org', 'https://relay.example.org'],
+  );
 });

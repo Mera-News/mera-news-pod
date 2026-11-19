@@ -207,6 +207,12 @@ export interface PodServices {
      * listener that throws is logged and does not stop the others.
      */
     on(event: 'changed', listener: () => void): () => void;
+    /**
+     * Calls `listener` with the new `emergency` and `high` picks of a batch, once per pick for the
+     * life of the pod process, whatever ntfy and the webhook do. Never awaited; a listener that
+     * throws or rejects is logged and does not stop the others. Returns a function that stops listening.
+     */
+    on(event: 'notify', listener: (picks: PickView[]) => void | Promise<void>): () => void;
   };
 }
 
@@ -236,8 +242,8 @@ export type PluginContext =
   | (PluginContextBase & {
       podApi: 2;
       services: PodServices;
-      /** The one https origin the pod lets a plugin ask to wake a paired phone through (pod.json `wakeRelay`), or null when off. */
-      wakeRelay: string | null;
+      /** The https origin of the Mera News app notifier (pod.json `notify.meraNewsApp`), or null when off. */
+      meraNewsApp: string | null;
     });
 
 interface PluginContextBase {

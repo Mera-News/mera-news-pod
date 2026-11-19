@@ -15,21 +15,24 @@ interface Sink {
   origin: string;
   requests: { path: string; headers: Record<string, string | string[] | undefined>; body: string }[];
   status: number;
+  /** When set, a request is recorded and never answered. */
+  hang: boolean;
   close(): Promise<void>;
 }
 /** A loopback server that records what it is sent and answers with `status`. */
 async function startSink(): Promise<Sink> {
-  const sink: Sink = { origin: '', requests: [], status: 200, close: async () => {} };
+  const sink: Sink = { origin: '', requests: [], status: 200, hang: false, close: async () => {} };
   const server: Server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
     sink.requests.push({ path: req.url ?? '', headers: req.headers, body: Buffer.concat(chunks).toString('utf8') });
+    if (sink.hang) return;
     res.writeHead(sink.status);
     res.end('ok');
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   sink.origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  sink.close = () => new Promise((resolve) => server.close(() => resolve()));
+  sink.close = () => new Promise((resolve) => (server.close(() => resolve()), server.closeAllConnections()));
   return sink;
 }
 const at = (sink: Sink, path: string) => sink.requests.filter((r) => r.path === path);
@@ -221,5 +224,129 @@ test('a notifier turned on for a pod with history sends none of the earlier pick
   } finally {
     await w.close();
     await sink.close();
+  }
+});
+
+const APP = { meraNewsApp: { enabled: true, url: 'https://relay.example.org' } };
+
+/** A plugin speaking 2 that records every notify event as one JSON line of the urls it carried. */
+function listenerPlugin(w: { home: string }, extra = '') {
+  const file = path.join(w.home, 'listen.js');
+  const log = path.join(w.home, 'listen.log');
+  fs.writeFileSync(
+    file,
+    `exports.podApi = 2; exports.name = 'listen';
+exports.createPlugin = (ctx) => ({
+  start: async () => {
+    ${extra}
+    ctx.services.events.on('notify', (picks) => require('node:fs').appendFileSync(${JSON.stringify(log)}, JSON.stringify(picks.map((p) => p.url)) + '\\n'));
+  },
+  stop: async () => {},
+});`,
+  );
+  const podJson = path.join(w.home, 'pod.json');
+  const cfg = JSON.parse(fs.readFileSync(podJson, 'utf8'));
+  fs.writeFileSync(podJson, JSON.stringify({ ...cfg, plugins: [{ package: file }] }));
+  return () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as string[]) : []);
+}
+const u = (id: string) => `https://example.com/${id}`;
+
+test('notify: the event carries exactly the important picks, without waiting for ntfy', async () => {
+  const sink = await startSink();
+  sink.hang = true;
+  const w = await world({ config: { notify: { ntfy: { enabled: true, url: `${sink.origin}/ntfy` }, ...APP } } });
+  const events = listenerPlugin(w);
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('plant', [{ id: 'medium', relevance: 0.65, publishedHoursAgo: 2 }, { id: 'high', relevance: 0.85, publishedHoursAgo: 1 }]);
+    await until(async () => events().length, (n) => n >= 1, 'the event');
+    assert.deepEqual(events(), [[u('high')]]);
+    assert.equal(at(sink, '/ntfy').length, 1, 'ntfy was asked and is still waiting');
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+    await sink.close();
+  }
+});
+
+test('notify: an ntfy failure neither stops nor repeats the event', async () => {
+  const sink = await startSink();
+  sink.status = 500;
+  const w = await world({ config: { notify: { ntfy: { enabled: true, url: `${sink.origin}/ntfy` }, ...APP } } });
+  const events = listenerPlugin(w);
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('plant', [{ id: 'first', relevance: 0.85, publishedHoursAgo: 2 }]);
+    await until(async () => events().length, (n) => n === 1, 'the first event');
+    await until(async () => pod.logs.filter((l) => l.includes('notifier could not send')).length, (n) => n >= 1, 'the failure to be logged');
+    assert.equal((await pod.ask('state')).notifiedSeq, 0);
+    await settle();
+    const failedSends = sink.requests.filter((r) => r.body === u('first')).length;
+    sink.status = 200;
+    await pod.ask('plant', [{ id: 'second', relevance: 0.85, publishedHoursAgo: 1 }]);
+    await until(async () => (await pod.ask('state')).notifiedSeq, (n) => n >= 2, 'the position to advance');
+    assert.deepEqual(events(), [[u('first')], [u('second')]]);
+    assert.equal(sink.requests.filter((r) => r.body === u('first')).length, failedSends + 1, 'ntfy retried the first pick once more, after the failures');
+    assert.equal(sink.requests.filter((r) => r.body === u('second')).length, 1);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+    await sink.close();
+  }
+});
+
+test('notify: a listener that throws neither holds the position nor sends ntfy twice', async () => {
+  const sink = await startSink();
+  const w = await world({ config: { notify: { ntfy: { enabled: true, url: `${sink.origin}/ntfy` }, ...APP } } });
+  const events = listenerPlugin(w, "ctx.services.events.on('notify', () => { throw new Error('x'); });");
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('plant', [{ id: 'first', relevance: 0.85, publishedHoursAgo: 2 }]);
+    await until(async () => (await pod.ask('state')).notifiedSeq, (n) => n >= 1, 'the position to advance');
+    await pod.ask('plant', [{ id: 'second', relevance: 0.85, publishedHoursAgo: 1 }]);
+    await until(async () => (await pod.ask('state')).notifiedSeq, (n) => n >= 2, 'the position to advance again');
+    assert.deepEqual(sink.requests.map((r) => r.body), [u('first'), u('second')]);
+    assert.deepEqual(events(), [[u('first')], [u('second')]]);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+    await sink.close();
+  }
+});
+
+test('notify: no event when meraNewsApp is off', async () => {
+  const sink = await startSink();
+  const w = await world({ config: { notify: { ntfy: { enabled: true, url: `${sink.origin}/ntfy` } } } });
+  const events = listenerPlugin(w);
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('plant', [{ id: 'high', relevance: 0.85 }]);
+    await until(async () => at(sink, '/ntfy').length, (n) => n === 1, 'ntfy to be sent');
+    await settle();
+    assert.deepEqual(events(), []);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+    await sink.close();
+  }
+});
+
+test('notify: with only meraNewsApp on, the loop arms and emits', async () => {
+  const w = await world({ config: { notify: APP } });
+  const events = listenerPlugin(w);
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('plant', [{ id: 'high', relevance: 0.85 }]);
+    await until(async () => events().length, (n) => n === 1, 'the event');
+    assert.deepEqual(events(), [[u('high')]]);
+    assert.ok((await pod.ask('state')).notifiedSeq >= 1);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
   }
 });

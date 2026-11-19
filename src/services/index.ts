@@ -35,6 +35,8 @@ export function createServices(context: ServicesContext): { services: PodService
     },
   };
   const notifier = createNotifier(cfg);
+  const appNotify = !!cfg.notify.meraNewsApp;
+  const running = !!notifier || appNotify;
   // Asked once, in the background: a plugin that needs it waits for the answer.
   const dataServer = fetchLimits(cfg);
 
@@ -52,7 +54,7 @@ export function createServices(context: ServicesContext): { services: PodService
   // A notifier starts at the newest pick when it is first turned on, or when the history starts
   // over, so it never sends the backlog of stories found before it was on.
   const arm = async () => {
-    if (!notifier) {
+    if (!running) {
       if (control.get().notifyEpoch !== null) control.setNotifyPosition(null, 0);
       return;
     }
@@ -61,14 +63,21 @@ export function createServices(context: ServicesContext): { services: PodService
     if (control.get().notifyEpoch !== epoch) control.setNotifyPosition(epoch, head);
   };
   let sending: Promise<void> = arm().catch((error) => log('warning', `The notifier could not start: ${(error as Error).message}`));
+  let emittedSeq = 0;
   const notifyNew = (picks: { seq: number; pick: PickView }[]) => {
-    if (!notifier) return;
+    if (!running) return;
     sending = sending
       .then(async () => {
         const fresh = picks.filter((p) => p.seq > control.get().notifiedSeq).sort((a, b) => a.seq - b.seq);
         if (!fresh.length) return;
         const important = fresh.filter((p) => NOTIFY_LEVELS.includes(p.pick.level));
-        if (important.length) await notifier.send(important.map((p) => p.pick));
+        // Each story is emitted once per process, before ntfy and the webhook, so a failing send never repeats it.
+        const toEmit = important.filter((p) => p.seq > emittedSeq);
+        if (appNotify && toEmit.length) {
+          changes.emitNotify(toEmit.map((p) => p.pick));
+          emittedSeq = toEmit[toEmit.length - 1].seq;
+        }
+        if (notifier && important.length) await notifier.send(important.map((p) => p.pick));
         control.setNotifiedSeq(fresh[fresh.length - 1].seq);
       })
       .catch((error) => log('warning', `A notifier could not send and will try again: ${(error as Error).message}`));

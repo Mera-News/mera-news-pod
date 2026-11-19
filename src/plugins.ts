@@ -98,8 +98,8 @@ export async function loadPlugins(cfg: LoadedConfig, deps: PluginDeps): Promise<
         : {
             ...deps.services,
             events: {
-              on(event, listener) {
-                const off = deps.services.events.on(event, listener);
+              on(event: 'changed' | 'notify', listener: never) {
+                const off = (deps.services.events.on as (e: string, l: never) => () => void)(event, listener);
                 unlisten.push(off);
                 return off;
               },
@@ -107,7 +107,7 @@ export async function loadPlugins(cfg: LoadedConfig, deps: PluginDeps): Promise<
           };
     try {
       const base = { services, config: entry.config, dataDir, log, estimateTokens };
-      const ctx = podApi === 1 ? { podApi, ...base } : { podApi, ...base, wakeRelay: cfg.wakeRelay?.origin ?? null };
+      const ctx = podApi === 1 ? { podApi, ...base } : { podApi, ...base, meraNewsApp: cfg.notify.meraNewsApp?.origin ?? null };
       loaded.push({ spec, name, unlisten, plugin: await mod.createPlugin(ctx as PluginContext) });
     } catch (error) {
       throw fail(`did not start: ${oneLine(error)}`);

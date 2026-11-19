@@ -60,15 +60,24 @@ test('plain errors for a missing file, a bad address and an interval out of rang
   assert.throws(() => loadConfig(home({ ...minimal, plugins: [{ package: '' }] }), {}), /plugins/);
 });
 
-test('wakeRelay must be an https origin, and anything else stops the load naming the key', () => {
-  assert.deepEqual(loadConfig(home({ ...minimal, wakeRelay: 'https://relay.example.org' }), {}).wakeRelay, { origin: 'https://relay.example.org' });
-  assert.deepEqual(loadConfig(home({ ...minimal, wakeRelay: 'https://relay.example.org/' }), {}).wakeRelay, { origin: 'https://relay.example.org' });
-  for (const bad of ['http://relay.example.org', 'https://relay.example.org/api', 'https://relay.example.org/?a=1', 'https://u:p@relay.example.org', 'https://relay.example.org/#x', 'not a url', true, 1, {}]) {
-    assert.throws(() => loadConfig(home({ ...minimal, wakeRelay: bad }), {}), (e: Error) => e instanceof ConfigError && /wakeRelay/.test(e.message), String(bad));
+test('notify.meraNewsApp on needs an https origin, and the error names the key', () => {
+  const on = (url: unknown) => home({ ...minimal, notify: { meraNewsApp: { enabled: true, url } } });
+  assert.deepEqual(loadConfig(on('https://relay.example.org'), {}).notify.meraNewsApp, { origin: 'https://relay.example.org' });
+  assert.deepEqual(loadConfig(on('HTTPS://Relay.Example.org:443'), {}).notify.meraNewsApp, { origin: 'https://relay.example.org' });
+  for (const bad of ['http://relay.example.org', 'https://relay.example.org/api', 'https://relay.example.org/?a=1', 'https://u:p@relay.example.org', 'https://relay.example.org/#x', 'not a url', undefined, 1]) {
+    assert.throws(
+      () => loadConfig(on(bad), {}),
+      (e: Error) => e instanceof ConfigError && e.message === 'notify.meraNewsApp.url must be an https origin, such as https://relay.example.org.',
+      String(bad),
+    );
   }
 });
 
-test('wakeRelay false and absent both mean off', () => {
-  assert.equal(loadConfig(home({ ...minimal, wakeRelay: false }), {}).wakeRelay, null);
-  assert.equal(loadConfig(home(minimal), {}).wakeRelay, null);
+test('notify.meraNewsApp off when absent, disabled, or wakeRelay alone is set', () => {
+  assert.equal(loadConfig(home(minimal), {}).notify.meraNewsApp, undefined);
+  assert.equal(loadConfig(home({ ...minimal, notify: {} }), {}).notify.meraNewsApp, undefined);
+  assert.equal(loadConfig(home({ ...minimal, notify: { meraNewsApp: { enabled: false, url: 'https://relay.example.org' } } }), {}).notify.meraNewsApp, undefined);
+  const old = loadConfig(home({ ...minimal, wakeRelay: 'https://relay.example.org' }), {}) as unknown as Record<string, unknown>;
+  assert.equal(old.wakeRelay, undefined);
+  assert.equal((old.notify as { meraNewsApp?: unknown }).meraNewsApp, undefined);
 });

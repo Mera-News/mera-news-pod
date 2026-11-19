@@ -81,28 +81,6 @@ The language, Skip notes, the 24-hour filter, the Explore choices and the topics
 
 The app's iCloud and Google Drive backups are off while the phone is paired, since the data is on the pod. Backing up the pod is up to you: stop it and copy its home folder, as in [back up](self-hosting.md#back-up).
 
-## Wake-ups
-
-A pod reads while the phone is closed, and a closed phone cannot ask the pod whether anything is new. A wake-up is a short signal that asks the phone to open the app in the background and fetch what the pod holds. It carries no news, no titles and nothing from your profile: it only says that something changed.
-
-Only Mera can push to the Mera News app, so the signal goes through a Mera relay. When the phone has given the pod a wake-up pass, the pod sends that pass to the relay after the news changes. The relay hands the signal to Expo's push service, which hands it to Apple or Google, which deliver it to the phone.
-
-What each side can see:
-
-- Mera sees that a wake-up was sent for your phone and when. It does not see what changed.
-- Expo, and then Apple or Google, see that a notification was delivered to the phone and when. The notification has no content.
-- Anyone watching your network sees the pod contact the relay.
-
-The pod sends at most one wake-up about every 31 minutes, and it waits while you are using the app, since the app is already fetching then.
-
-The pod sends wake-ups only when `wakeRelay` in `pod.json` names the relay's https origin. Leave it out, or set it to `false`, and the pod never contacts the relay:
-
-```json
-"wakeRelay": false
-```
-
-**A lost phone keeps getting wake-ups until it is revoked on the pod.** Revoking the phone (`devices --revoke <id>`) deletes its pass at once.
-
 ## What the phone still sends to Mera
 
 While paired, the phone sends Mera only requests about your Mera News account: signing in, your subscription, notifications and feedback requests. Your profile, your feed and your chats go to your pod.

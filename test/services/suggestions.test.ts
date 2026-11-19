@@ -15,6 +15,23 @@ const plain = (hint: string) => {
   assert.doesNotMatch(hint, /\u2014|\u2013|undefined|\[object/);
 };
 
+test('suggestions.get with peek leaves the picks for the next read without a cursor', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('plantFact', { statement: 'Follows sailing', status: 'done', topics: [{ text: 'sailing races' }] });
+    await pod.ask('plant', [{ id: 'alpha', publishedHoursAgo: 2 }, { id: 'bravo', publishedHoursAgo: 1 }]);
+    const urls = (reply: { picks: { url: string }[] }) => reply.picks.map((p) => p.url.split('/').pop());
+    assert.deepEqual(urls(await ok(pod, 'suggestions.get', { since: 'all', limit: 10, peek: true })), ['alpha', 'bravo']);
+    assert.deepEqual(urls(await get(pod)), ['alpha', 'bravo'], 'the peek delivered nothing');
+    assert.deepEqual(urls(await get(pod)), [], 'the plain read delivered them');
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
 test('each state says what the pod is doing and when to look again, and an empty list never stands alone', async () => {
   const w = await world();
   try {

@@ -98,7 +98,7 @@ export function createServices(context: ServicesContext): { services: PodService
     events: changes.events,
 
     suggestions: {
-      async get({ since, limit, fits }) {
+      async get({ since, limit, fits, peek }) {
         if (!Number.isInteger(limit) || limit < 1) throw new PodError('bad_limit', 'limit must be a whole number of at least 1.', 'pass a limit such as 10');
         const [snapshot, reply] = await Promise.all([
           takeSnapshot(snapshotInputs),
@@ -106,7 +106,7 @@ export function createServices(context: ServicesContext): { services: PodService
             const { candidates, liveIds } = await readFeed();
             const seqs = tx.register(candidates.map((c) => c.memberIds), liveIds);
             const fitsPage = fits ? (page: { pick: PickView }[]) => fits(page.map((i) => i.pick)) : undefined;
-            const taken = tx.take(candidates.map((c, i) => ({ seq: seqs[i], pick: c.pick })), since, limit, fitsPage);
+            const taken = tx.take(candidates.map((c, i) => ({ seq: seqs[i], pick: c.pick })), since, limit, fitsPage, peek === true);
             return { ...taken, all: candidates.length };
           }),
         ]);

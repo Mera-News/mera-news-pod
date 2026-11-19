@@ -158,9 +158,10 @@ export interface PodServices {
     /**
      * `since`: a cursor, 'all' to replay, or absent for "after the last pick delivered". `fits`: a
      * caller with a size limit says whether a page of picks fits; the page is cut until it does (never
-     * below one pick), and only the picks returned count as delivered, so a cut loses none.
+     * below one pick), and only the picks returned count as delivered, so a cut loses none. `peek`
+     * delivers nothing, so a reader that only shows picks never takes them from another caller.
      */
-    get(options: { since?: string; limit: number; fits?: (picks: PickView[]) => boolean }): Promise<SuggestionsReply>;
+    get(options: { since?: string; limit: number; fits?: (picks: PickView[]) => boolean; peek?: boolean }): Promise<SuggestionsReply>;
   };
   reading: {
     status(): Promise<PodStatus>;

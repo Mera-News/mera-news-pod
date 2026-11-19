@@ -77,6 +77,17 @@ test("'all' replays every pick without moving what was delivered back", async ()
   assert.deepEqual(ids(await read(ledger, stories, undefined)), [], 'replaying does not make the picks new again');
 });
 
+test('a peek delivers nothing: the next read with no cursor still returns every pick', async () => {
+  const ledger = createLedger(temp());
+  const stories = [['a'], ['b']];
+  const peeked = await ledger.run((tx) => {
+    const seqs = tx.register(stories, new Set(stories.flat()));
+    return tx.take(seqs.map((seq, i): Item => ({ seq, id: stories[i][0] })), 'all', 10, undefined, true);
+  });
+  assert.deepEqual(ids(peeked), ['a', 'b']);
+  assert.deepEqual(ids(await read(ledger, stories, undefined)), ['a', 'b'], 'the peek left them to be delivered');
+});
+
 test('a pick that leaves the Feed and returns is not delivered again', async () => {
   const ledger = createLedger(temp());
   await read(ledger, [['a'], ['b']], undefined);

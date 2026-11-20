@@ -12,7 +12,7 @@ A data server may not answer every question the pod can ask. At start the pod as
 
 A current `mera-news-data-server` answers all of them.
 
-A current data server answers place lookups, but it holds no places until they are loaded. Until then `get_status` lists `places_not_loaded` under `problems`, and `add_facts` says local coverage may be weaker after you add where you live. Load them with `npm run seed-places` in the data server (its README says which file to download), then restart the pod.
+A current data server answers place lookups, but it holds no places until they are loaded. Until then `get_status` lists `places_not_loaded` under `problems`, and `add_facts` says local coverage may be weaker after you add where you live. Load them with `npm run seed-places` in the data server ([its guide](https://github.com/Mera-News/mera-news-data-server/blob/dev/docs/self-host.md) says which file to download), then restart the pod.
 
 An older data server can also lack these. Update it to have them:
 

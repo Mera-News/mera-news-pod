@@ -2,7 +2,9 @@
 
 The pod keeps your news profile on your machine, reads the news on a schedule and keeps the stories that matter to you, each with a one-line reason. You reach it through a plugin, see [clients](clients.md).
 
-It needs Node 22.13 or newer, a Mera News data server you can reach (`mera-news-data-server`), and an AI service with an OpenAI-compatible API. The AI service can run on your own machine.
+It needs Node 22.13 or newer, a Mera News data server, and an AI service with an OpenAI-compatible API. The AI service can run on your own machine.
+
+Run the data server first, with [its guide](https://github.com/Mera-News/mera-news-data-server/blob/dev/docs/self-host.md). The pod needs its search, which the data server offers only with a key, so set it up as its step 21 says: `NEWS_API_OPEN=false` and `MERA_NEWS_API_KEY` in the data server's `.env`, then the same key as `dataApiKey` in the pod's `secrets.json` and the data server's address as `dataServer.url` in its `pod.json` (both below). The data server's open mode, without a key, is for trying the data server alone.
 
 ## Install
 
@@ -46,7 +48,7 @@ Edit `pod.json`:
 | `reading.runTimeoutMinutes` | How long one read may take, 1 to 240. Default 30. |
 | `language`, `region` | Taken from your machine by `init`. Change them if they are wrong. |
 | `notify` | See [notifiers](#notifiers). |
-| `plugins` | The plugins to run, see [clients](clients.md). |
+| `plugins` | The plugins to run, see [clients](clients.md) and [writing a plugin](plugins.md). |
 
 Keys go in `secrets.json`, which must not be readable by other users (`chmod 600`):
 
@@ -54,7 +56,7 @@ Keys go in `secrets.json`, which must not be readable by other users (`chmod 600
 { "aiApiKey": "...", "dataApiKey": "..." }
 ```
 
-`MERA_POD_AI_API_KEY` and `MERA_POD_DATA_API_KEY` override them. Leave a key out when the server needs none.
+`dataApiKey` is the data server's `MERA_NEWS_API_KEY`. `MERA_POD_AI_API_KEY` and `MERA_POD_DATA_API_KEY` override them. Leave `aiApiKey` out when your AI service needs none.
 
 The settings are read when the pod starts. After an edit, restart it.
 

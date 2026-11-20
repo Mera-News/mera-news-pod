@@ -1,7 +1,5 @@
-# While mera-news-client and mera-news-data-server are private, CI reads them with read-only
-# deploy keys kept as repository secrets: CLIENT_DEPLOY_KEY (the client package npm installs)
-# and DATA_SERVER_DEPLOY_KEY (the data server's GraphQL schema the tests serve). This repo
-# itself is read with the default token, and checkout persists no credentials.
+# The client package npm installs and the data server's GraphQL schema the tests serve come from
+# public repositories, read without credentials. Checkout persists no credentials either.
 name: CI
 
 on:
@@ -28,17 +26,12 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - name: Install
-        env:
-          CLIENT_DEPLOY_KEY: ${{ secrets.CLIENT_DEPLOY_KEY }}
-        run: bash .github/scripts/with-deploy-keys.sh mera-news-client=CLIENT_DEPLOY_KEY -- npm ci
+        run: npm ci
       - name: Fetch the data server schema at the pinned commit
-        env:
-          DATA_SERVER_DEPLOY_KEY: ${{ secrets.DATA_SERVER_DEPLOY_KEY }}
         run: |
           out="$RUNNER_TEMP/data-server"
           git init -q "$out"
-          bash .github/scripts/with-deploy-keys.sh mera-news-data-server=DATA_SERVER_DEPLOY_KEY -- \
-            git -C "$out" fetch -q --depth 1 https://github.com/Mera-News/mera-news-data-server "$DATA_SERVER_REV"
+          git -C "$out" fetch -q --depth 1 https://github.com/Mera-News/mera-news-data-server "$DATA_SERVER_REV"
           git -C "$out" show FETCH_HEAD:apps/mera-server-news-api/src/schema.gql > "$RUNNER_TEMP/data-server-schema.gql"
           echo "MERA_DATA_SERVER_SCHEMA=$RUNNER_TEMP/data-server-schema.gql" >> "$GITHUB_ENV"
       - run: npm run typecheck
@@ -61,9 +54,7 @@ jobs:
           node-version: 22.x
           cache: npm
       - name: Install
-        env:
-          CLIENT_DEPLOY_KEY: ${{ secrets.CLIENT_DEPLOY_KEY }}
-        run: bash .github/scripts/with-deploy-keys.sh mera-news-client=CLIENT_DEPLOY_KEY -- npm ci
+        run: npm ci
       # @nozbe/sqlite@3.46.0 (pulled in by WatermelonDB) declares no license field. It ships the
       # SQLite 3.46.0 amalgamation unchanged, and SQLite is in the public domain (the "blessing"
       # header in sqlite3.c), so it is excluded by exact version. mera-news-client is Mera's own,

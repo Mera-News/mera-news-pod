@@ -139,7 +139,7 @@ All three are off by default and are set in `notify` in `pod.json`. Each sends n
 
 - `ntfy`: `{ "enabled": true, "url": "https://ntfy.sh/<topic>" }`. It gets the headline, the level and the link. Anyone who knows an ntfy topic name can read it, so `init` makes a long random name and the message carries no reason.
 - `webhook`: `{ "enabled": true, "url": "https://..." }`. It gets one request with every new pick, `{ "picks": [{ "title", "url", "level", "reason" }] }`: the headline, link, level and the one-line reason.
-- `meraNewsApp`: `{ "enabled": true, "url": "https://..." }`. It shows a new top story on the phone paired through the sync plugin, through Mera's sign-in service: the headline and the story's id, at most one every 15 minutes, emergency stories at once. See [notifications on the phone](sync.md#notifications-on-the-phone) for what Mera, Expo and Apple or Google receive.
+- `meraNewsApp`: not available yet. `{ "enabled": true, "url": "https://..." }`. It would show a new top story on the phone paired through the sync plugin, through Mera's sign-in service: the headline and the story's id, at most one every 15 minutes, emergency stories at once. See [notifications on the phone](sync.md#notifications-on-the-phone) for what Mera, Expo and Apple or Google receive.
 
 A saved fact is never sent. Turning a notifier on later sends only picks that arrive after that. A send to ntfy or the webhook that fails is tried again; a notification to the phone is tried at most twice.
 

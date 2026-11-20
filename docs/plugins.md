@@ -1,6 +1,6 @@
 # Writing a plugin
 
-A plugin is a Node module the pod loads into its own process. It gets your profile, your picks and the pod's reading state, and serves them however you like: a page in your browser, a tool for your own AI app, a bot, a feed reader. The pod's own MCP server and the Mera News app's sync are plugins too.
+A plugin is a Node module the pod loads into its own process. It gets your profile, your picks and the pod's reading state, and serves them however you like: a page in your browser, a tool for your own AI app, a bot, a feed reader. The pod's own MCP server is a plugin too.
 
 Plugins you write are yours. Share them as you like.
 
@@ -31,7 +31,7 @@ exports.createPlugin = (ctx) => ({
 - `log`: `debug`, `info`, `warn` and `error`, each taking a message. They go to the pod's log, so never log a token or a key.
 - `estimateTokens(text)`: the token estimate the pod uses for its own prompts, for keeping replies within a client's limit.
 - `services`: what the pod offers, below.
-- `meraNewsApp`: the Mera News app notifier's origin, or `null` (version 2 only).
+- `meraNewsApp`: the Mera News app notifier's origin, or `null` (version 2 only). That notifier is not available yet.
 
 The types are in `mera-news-pod/plugin-api`. Import types only: a plugin never imports the pod's code.
 
@@ -44,7 +44,7 @@ The types are in `mera-news-pod/plugin-api`. Import types only: a plugin never i
 | `reading` | `status()` is the pod's state: when it reads, what it found, and any problem with a fix. `set({ paused })` pauses or resumes reading; `readNow()` starts a read. |
 | `model` | `chatCompletions(body, signal)` sends an OpenAI-style chat request to the pod's AI service. |
 | `news` | `graphql(body)` asks the data server, for the news operations the pod allows. |
-| `display`, `commands` | The tables the Mera News app shows, and the named changes it makes. The sync plugin uses them. |
+| `display`, `commands` | The tables the Mera News app shows, and the named changes it makes. The sync plugin uses them; pairing the app with a pod is not available yet. |
 | `events` | `on('changed', listener)` after a change to what the app's tables hold (the profile and the picks among them) or to the pick history, at most every two seconds. `on('notify', listener)` with each new `emergency` and `high` pick. Both return a function that stops listening. |
 
 `display`, `commands`, `events` and `reading.readNow` are in version 2 only. A pod error carries a `code`, a `message` and a `next` step you can show as they are.

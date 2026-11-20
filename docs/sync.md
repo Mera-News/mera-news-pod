@@ -1,5 +1,7 @@
 # Pairing the Mera News app
 
+**Pairing the Mera News app with a pod is not available yet.** This page describes the sync plugin's design.
+
 The Mera News app can show a pod's news, profile and picks instead of reading the news on the phone. The phone then stops reading the news itself: the pod reads, and the phone shows what the pod holds and sends your changes to it. This works through the `sync` plugin, which lives in the `mera-news-pod-plugins` repository, in `packages/sync`.
 
 ## One pod, one person, one phone
@@ -82,6 +84,8 @@ The language, Skip notes, the 24-hour filter, the Explore choices and the topics
 The app's iCloud and Google Drive backups are off while the phone is paired, since the data is on the pod. Backing up the pod is up to you: stop it and copy its home folder, as in [back up](self-hosting.md#back-up).
 
 ## Notifications on the phone
+
+**Notifications on the phone are not available yet.**
 
 The pod can show a new top story on the paired phone as a notification. Tapping it opens that story in the Mera News app. This is off unless you turn it on in `pod.json`:
 

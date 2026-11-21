@@ -114,6 +114,60 @@ describe('fake data server', () => {
     assert.equal(bad.errors[0].extensions.code, 'BAD_WINDOW');
   });
 
+  it('searchNews finds planted articles by every query word, newest first, capped at 25', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ _id: `m${i}`, title: `Rail strike ${i}`, pubDate: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString() }));
+    const server = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles: [{ _id: 'x', title: 'Rail only' }, ...many], topics: {} });
+    try {
+      const q = (text: string, limit?: number) =>
+        query(server, 'query($q: String!, $l: Int){ searchNews(query: $q, limit: $l){ _id title_en pubDate image_url score } }', { q: text, l: limit }).then((r) => r.json() as Promise<any>);
+      const two = (await q('STRIKE  rail', 2)).data.searchNews;
+      assert.deepEqual(two.map((h: any) => h._id), ['m29', 'm28']);
+      assert.equal(two[0].score, 1 - 0 / 3);
+      assert.ok(two[0].score > two[1].score);
+      assert.equal(two[0].image_url, null);
+      assert.equal((await q('rail', 99)).data.searchNews.length, 25);
+      assert.equal((await q('rail')).data.searchNews.length, 10);
+      assert.equal((await q('rail 3')).data.searchNews.length, 3);
+      assert.deepEqual((await q('   ')).data.searchNews, []);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('articlesForCountry pages newest first, filters by country, and refuses an unknown cursor', async () => {
+    const planted = [
+      { _id: 'n1', title: 'Old', country_code: 'NL', pubDate: '2026-01-01T00:00:00.000Z' },
+      { _id: 'n2', title: 'New', country_code: 'NL', pubDate: '2026-01-03T00:00:00.000Z' },
+      { _id: 'n3', title: 'Mid', country_code: 'NL', pubDate: '2026-01-02T00:00:00.000Z', language_code: 'nl' },
+      { _id: 'u1', title: 'US', country_code: 'US', pubDate: '2026-01-05T00:00:00.000Z' },
+    ];
+    const server = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles: planted, topics: {} });
+    try {
+      const page = (v: unknown) =>
+        query(server, 'query($c: String, $f: Int, $a: String){ articlesForCountry(countryCode: $c, first: $f, after: $a){ articles { _id title_en article_url pubDate original_language_code publicationSource { publication_name } } pageInfo { endCursor hasNextPage pageSize } } }', v).then((r) => r.json() as Promise<any>);
+      const one = (await page({ c: 'nl', f: 2 })).data.articlesForCountry;
+      assert.deepEqual(one.articles.map((a: any) => a._id), ['n2', 'n3']);
+      assert.deepEqual(one.pageInfo, { endCursor: 'n3', hasNextPage: true, pageSize: 2 });
+      assert.equal(one.articles[1].original_language_code, 'nl');
+      assert.equal(one.articles[0].publicationSource.publication_name, 'Pub n2');
+      const two = (await page({ c: 'NL', f: 2, a: 'n3' })).data.articlesForCountry;
+      assert.deepEqual(two.articles.map((a: any) => a._id), ['n1']);
+      assert.equal(two.pageInfo.hasNextPage, false);
+      const all = (await page({})).data.articlesForCountry;
+      assert.deepEqual(all.articles.map((a: any) => a._id), ['u1', 'n2', 'n3', 'n1']);
+      assert.equal((await page({ c: 'GLOBAL' })).data.articlesForCountry.articles.length, 4);
+      const bad = await page({ a: 'nope' });
+      assert.equal(bad.errors[0].extensions.code, 'BAD_USER_INPUT');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('allCountries lists the planted countries', async () => {
+    const res = (await (await query(data, '{ allCountries }')).json()) as any;
+    assert.deepEqual(res.data.allCountries, ['NL', 'US']);
+  });
+
   it('searches places by prefix and says in its status whether any are loaded', async () => {
     const places = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles, topics: {}, places: [
       { city: 'Utrecht', countryCode: 'NL', population: 360000 },
@@ -154,7 +208,7 @@ describe('fake data server', () => {
 
 
   it('answers 501 for a real operation it does not serve', async () => {
-    const res = await query(data, '{ allCountries }');
+    const res = await query(data, '{ articleById(id: "a1") { _id } }');
     assert.equal(res.status, 501);
     assert.equal(((await res.json()) as any).errors[0].extensions.code, 'NOT_IMPLEMENTED');
   });

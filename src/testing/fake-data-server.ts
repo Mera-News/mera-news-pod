@@ -155,7 +155,59 @@ function resolversFor(options: FakeDataServerOptions) {
     return [...byName.values()];
   };
 
+  // Newest first; a missing pubDate is as new as the fake. The sort is stable, so ties keep planted order.
+  const newestFirst = (list: FakeArticle[]) =>
+    [...list].sort((a, b) => Date.parse(withDefaults(b, now).pubDate) - Date.parse(withDefaults(a, now).pubDate));
+  const clamp = (n: number | null | undefined, fallback: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, n ?? fallback));
+
   return {
+    allCountries: () =>
+      [...new Set(articles.flatMap((a) => (a.country_code ? [a.country_code.toUpperCase()] : [])))].sort(),
+    searchNews: ({ query, limit }: { query: string; limit?: number | null }) => {
+      const words = norm(query).split(' ').filter(Boolean);
+      if (words.length === 0) return [];
+      const hits = newestFirst(
+        articles.filter((a) => {
+          const text = `${a.title} ${a.title_en ?? ''}`.toLowerCase();
+          return words.every((w) => text.includes(w));
+        }),
+      ).slice(0, clamp(limit, 10, 1, 25));
+      return hits.map((a, i) => {
+        const full = withDefaults(a, now);
+        return {
+          _id: a._id,
+          title_en: full.title_en,
+          pubDate: full.pubDate,
+          publication_name: full.publication_name,
+          country_code: full.country_code,
+          image_url: null,
+          score: 1 - i / (hits.length + 1),
+        };
+      });
+    },
+    articlesForCountry: ({ countryCode, first, after }: { countryCode?: string | null; first?: number | null; after?: string | null }) => {
+      const code = countryCode?.toUpperCase() === 'GLOBAL' ? null : countryCode;
+      const sorted = newestFirst(byCountry(code));
+      let start = 0;
+      if (after != null) {
+        const at = sorted.findIndex((a) => a._id === after);
+        if (at < 0) throw new GraphQLError('after is not a cursor this server gave out', { extensions: { code: 'BAD_USER_INPUT' } });
+        start = at + 1;
+      }
+      const page = sorted.slice(start, start + clamp(first, 20, 1, 50));
+      return {
+        articles: page.map((a) => {
+          const full = withDefaults(a, now);
+          return {
+            ...asNewsArticle(a, now),
+            original_language_code: full.language_code,
+            publicationSource: asSource(full.publication_name, full.country_code, now),
+          };
+        }),
+        pageInfo: { endCursor: page.at(-1)?._id ?? null, hasNextPage: start + page.length < sorted.length, pageSize: page.length },
+      };
+    },
     articleIdsForPersona: ({ query }: { query: PersonaQuery }) => ({
       topicResults: query.topics.flatMap((t) => {
         const ids = (topics[norm(t.text)] ?? []).slice(0, t.limit ?? query.limitPerTopic);

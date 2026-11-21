@@ -198,7 +198,8 @@ export function judge(s: Snapshot, paused: boolean, returned = 0, now = Date.now
 export function buildStatus(cfg: LoadedConfig, control: Control, s: Snapshot, picks: number, server: DataServerInfo): PodStatus {
   const paused = control.get().paused;
   return {
-    reading: control.readingState(),
+    // With no AI service nothing can read, whatever the person chose; the problem says why.
+    reading: cfg.ai ? control.readingState() : 'paused',
     everyMinutes: control.get().everyMinutes,
     readingNow: s.readingNow,
     firstReadDone: s.lastRunMs !== null,

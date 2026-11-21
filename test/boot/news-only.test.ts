@@ -39,6 +39,8 @@ test('news-only: the pod starts with no ai, sends nothing to any AI origin, and 
     assert.equal(status.problems[0].who, 'person');
     assert.match(status.problems[0].fix, /^No AI service is set, so the pod makes no picks\. News search and the latest news still work\. To get picks, set ai\.baseUrl and ai\.model in pod\.json and restart the pod\.$/);
     assert.equal(status.ai, null);
+    assert.equal(status.reading, 'paused', 'nothing can read without an AI service');
+    assert.equal(status.nextReadAt, null);
 
     const suggestions = await ok(pod, 'suggestions.get', { limit: 10 });
     assert.equal(suggestions.state, 'problem');

@@ -13,7 +13,7 @@ after(killAll);
 /** A home whose pod.json has no ai block, beside a model the config does not name. */
 async function newsOnlyWorld() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pod-news-only-'));
-  const data = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles: [{ _id: 'a1', title: 'One' }], topics: {}, places: [{ city: 'Utrecht', countryCode: 'NL' }] });
+  const data = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles: [{ _id: 'a1', title: 'One' }], topics: {} }); // no places: a store without them must not add a second problem
   const model = await startFakeModel();
   fs.writeFileSync(path.join(home, 'pod.json'), JSON.stringify({ dataServer: { url: data.origin }, language: 'en' }));
   return {

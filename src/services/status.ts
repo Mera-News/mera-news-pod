@@ -208,8 +208,9 @@ export function buildStatus(cfg: LoadedConfig, control: Control, s: Snapshot, pi
     counts: { facts: s.facts, topics: s.topics, topicsPending: s.topicsPending, picks },
     problems: [
       ...problemsOf(s),
-      ...(server.placesNotLoaded
-        ? [{ code: 'places_not_loaded', who: 'person' as const, fix: 'The data server has no places loaded, so a place in a fact is not looked up. Load them on the data server with its seed-places command, then restart the pod.' }]
+      // With no AI service no fact is read, so a missing place does not matter.
+      ...(server.placesNotLoaded && cfg.ai
+        ? [{ code: 'places_not_loaded', who: 'person' as const, fix: 'The data server has no places loaded, so a place in a fact is not looked up. The one-computer setup has none; on the server setup, load them with its seed-places command.' }]
         : []),
     ],
     limits: server.limits,

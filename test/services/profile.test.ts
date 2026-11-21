@@ -113,6 +113,7 @@ test('a home fact says local coverage is weaker only while the data server has n
     // The fake answers place lookups but holds no places: a reason, not a missing feature.
     assert.ok(!status.limits.includes('place lookup'));
     assert.deepEqual(status.problems.filter((p: any) => p.code === 'places_not_loaded').map((p: any) => p.who), ['person']);
+    assert.equal(status.problems.find((p: any) => p.code === 'places_not_loaded').fix, 'The data server has no places loaded, so a place in a fact is not looked up. The one-computer setup has none; on the server setup, load them with its seed-places command.');
     assert.equal((await ok(pod, 'profile.addFacts', ['Follows chess'])).localCoverageWeaker, undefined);
     assert.equal((await ok(pod, 'profile.addFacts', ['Lives in Utrecht'])).localCoverageWeaker, true);
     await pod.ask('stop');

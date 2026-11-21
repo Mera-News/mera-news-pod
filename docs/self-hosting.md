@@ -2,9 +2,14 @@
 
 The pod keeps your news profile on your machine, reads the news on a schedule and keeps the stories that matter to you, each with a one-line reason. You reach it through a plugin, see [clients](clients.md).
 
-It needs Node 22.13 or newer, a Mera News data server, and an AI service with an OpenAI-compatible API. The AI service can run on your own machine.
+It needs Node 22.13 or newer (Node 24 also runs the one-computer news store), a Mera News data server, and, for picks, an AI service with an OpenAI-compatible API. The AI service can run on your own machine.
 
-Run the data server first, with [its guide](https://github.com/Mera-News/mera-news-data-server/blob/dev/docs/self-host.md). The pod needs its search, which the data server offers only with a key, so set it up as its step 21 says: `NEWS_API_OPEN=false` and `MERA_NEWS_API_KEY` in the data server's `.env`, then the same key as `dataApiKey` in the pod's `secrets.json` and the data server's address as `dataServer.url` in its `pod.json` (both below). The data server's open mode, without a key, is for trying the data server alone.
+## Choose where the news comes from
+
+- **On this computer** (start here): the data server's [one-computer setup](https://github.com/Mera-News/mera-news-data-server/blob/dev/docs/self-host.md#the-one-computer-setup), one SQLite file with no account, no Docker and no key. It is meant for 10 to 20 feeds. Run `mera-news-local serve`, set `dataServer.url` to `http://127.0.0.1:3002` in `pod.json` below, and leave `dataApiKey` unset.
+- **The server setup**, for more feeds than that: follow [the data server guide](https://github.com/Mera-News/mera-news-data-server/blob/dev/docs/self-host.md) through its step 21. The pod needs its search, which the server setup offers only with a key: `NEWS_API_OPEN=false` and `MERA_NEWS_API_KEY` in the data server's `.env`, then the same key as `dataApiKey` in the pod's `secrets.json` and the data server's address as `dataServer.url` in its `pod.json`. Its open mode, without a key, is for trying the data server alone.
+
+Picks need an AI service, and they cover articles published in the last 48 hours. Without an AI service, leave `ai` out of `pod.json`: the pod then makes no picks, but the MCP tools `search_news` and `latest_news` still read the stored news, and `get_status` says `no_ai_service`.
 
 ## Install
 
@@ -41,7 +46,7 @@ Edit `pod.json`:
 | Key | Meaning |
 |---|---|
 | `dataServer.url` | The data server. `/graphql` is added when missing. |
-| `ai.baseUrl`, `ai.model` | The AI service and the model it should use. Both are required. |
+| `ai.baseUrl`, `ai.model` | The AI service and the model it should use. Both are needed for picks; leave the whole `ai` block out to serve news only. |
 | `ai.concurrency` | Requests in flight at once, 1 to 16. Default 2. |
 | `ai.callTimeoutSeconds` | How long one request may take, 10 to 3600. Default 300. |
 | `reading.everyMinutes` | How often the pod reads, 5 to 1440. Default 15. |
@@ -56,7 +61,7 @@ Keys go in `secrets.json`, which must not be readable by other users (`chmod 600
 { "aiApiKey": "...", "dataApiKey": "..." }
 ```
 
-`dataApiKey` is the data server's `MERA_NEWS_API_KEY`. `MERA_POD_AI_API_KEY` and `MERA_POD_DATA_API_KEY` override them. Leave `aiApiKey` out when your AI service needs none.
+`dataApiKey` is the data server's `MERA_NEWS_API_KEY`; leave it out for the one-computer setup. `MERA_POD_AI_API_KEY` and `MERA_POD_DATA_API_KEY` override them. Leave `aiApiKey` out when your AI service needs none.
 
 The settings are read when the pod starts. After an edit, restart it.
 

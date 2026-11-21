@@ -9,6 +9,10 @@ on:
 env:
   # The data server commit whose schema the fake data server in the tests serves.
   DATA_SERVER_REV: f9f5d343260c1f4eada47eb983281f0c9e442512
+  # The data server commit whose one-computer store the local-store job runs, and the plugins commit
+  # whose mcp plugin it loads into the pod.
+  LOCAL_STORE_REV: e730980d85bb5f1e9f2f8a0a68a3d863074c2385
+  PLUGINS_REV: 6ccec7172aeb582a60dc905050b74545a2566a25
 
 jobs:
   test:
@@ -42,6 +46,32 @@ jobs:
         env:
           LOCK_RUNS: 10
         run: for i in $(seq 1 "$LOCK_RUNS"); do npx tsx --test test/host/lock.test.ts > /dev/null || { echo "lock test failed on run $i"; exit 1; }; done; echo "lock test passed $LOCK_RUNS runs"
+
+  # The pod against the data server's one-computer store, fed from loopback feeds with its test
+  # embedder: first picks, the mcp read tools with no AI service, and every document the pod sends.
+  local-store:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Fetch and build the one-computer store and the mcp plugin at their pinned commits
+        run: |
+          fetch() { git init -q "$2" && git -C "$2" fetch -q --depth 1 "https://github.com/Mera-News/$1" "$3" && git -C "$2" checkout -q FETCH_HEAD; }
+          fetch mera-news-data-server "$RUNNER_TEMP/data-server" "$LOCAL_STORE_REV"
+          fetch mera-news-pod-plugins "$RUNNER_TEMP/plugins" "$PLUGINS_REV"
+          (cd "$RUNNER_TEMP/data-server/local" && npm ci)
+          (cd "$RUNNER_TEMP/plugins" && npm ci && npm run build -w packages/mcp)
+          echo "MERA_LOCAL_STORE_CLI=$RUNNER_TEMP/data-server/local/dist/cli.mjs" >> "$GITHUB_ENV"
+          echo "MERA_MCP_PLUGIN=$RUNNER_TEMP/plugins/packages/mcp" >> "$GITHUB_ENV"
+      - run: npm run build
+      - run: npx tsx --test test/contract/local-store.test.ts
 
   licenses:
     runs-on: ubuntu-latest

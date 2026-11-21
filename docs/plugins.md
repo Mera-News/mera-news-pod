@@ -8,6 +8,10 @@ Plugins you write are yours. Share them as you like.
 
 The quickest start is to copy the `starter` package from [mera-news-pod-plugins](https://github.com/Mera-News/mera-news-pod-plugins/tree/dev/packages/starter). It is one file. It serves a local page that lists your picks, and three JSON routes (`/picks`, `/profile`, `/status`) behind a token file, on `127.0.0.1` only. Read it top to bottom, then change it.
 
+## Publishers' content
+
+Each pick links to an article on its publisher's site, and `/picks` returns that link as `url`. Show the headline and the link, and send the reader to the publisher's site. Do not fetch, scrape, copy or summarise article text from a publisher's site: that may breach the publisher's copyright. A plugin that helps readers subscribe to publishers they value is welcome.
+
 ## What a plugin exports
 
 ```js

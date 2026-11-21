@@ -72,7 +72,7 @@ node build/cli.js check
 node build/cli.js start
 ```
 
-`check` sends one request to the data server and one to the model, loads the plugins and says in one sentence what to fix. `start` runs the same check, then runs the pod and prints how often it reads. Stop it with Ctrl-C or a stop signal. Only one pod can run on a home folder at a time.
+`check` sends one request to the data server and, when `ai` is set, one to the model, loads the plugins and says in one sentence what to fix. `start` runs the same check, then runs the pod and prints how often it reads. Stop it with Ctrl-C or a stop signal. Only one pod can run on a home folder at a time.
 
 The pod also says what is wrong while it runs. Ask your assistant for the status, or see [limits](limits.md). Problems you fix yourself:
 
@@ -147,6 +147,14 @@ All three are off by default and are set in `notify` in `pod.json`. Each sends n
 - `meraNewsApp`: not available yet. `{ "enabled": true, "url": "https://..." }`. It would show a new top story on the phone paired through the sync plugin, through Mera's sign-in service: the headline and the story's id, at most one every 15 minutes, emergency stories at once. See [notifications on the phone](sync.md#notifications-on-the-phone) for what Mera, Expo and Apple or Google receive.
 
 A saved fact is never sent. Turning a notifier on later sends only picks that arrive after that. A send to ntfy or the webhook that fails is tried again; a notification to the phone is tried at most twice.
+
+## Where things live, and stopping and starting
+
+- The pod's code is the folder you cloned, `~/mera-news-pod` in the examples. The plugins' code is their own clone, such as `~/mera-news-pod-plugins`.
+- Everything the pod keeps is in its home folder, `~/.mera-news-pod` (or `MERA_POD_HOME`): `pod.json`, `secrets.json`, and `data/` with the profile (`data/mera.db`), the pick list and one folder per plugin (`data/plugins/<name>`, where the mcp plugin keeps its token).
+- The one-computer news store keeps its files in its own folder, `~/.mera-news-local`.
+
+Start the pod with `node build/cli.js start` in its folder, and stop it with Ctrl-C in that terminal or a stop signal. Run as a service, it is `systemctl --user stop mera-news-pod` and `systemctl --user start mera-news-pod`, or on macOS `launchctl bootout gui/$(id -u)/news.mera.pod` and `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/news.mera.pod.plist`. The news store's `mera-news-local serve` stops with Ctrl-C too. Start the news store before the pod.
 
 ## Update
 

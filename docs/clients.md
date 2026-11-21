@@ -39,9 +39,9 @@ Every request needs a token. The pod never prints it. It is in `~/.mera-news-pod
 - `npx mera-news-pod-mcp token --rotate` makes a new token and prints it once. The old one stops working at once.
 - Add `--home <folder>` when the pod does not use the default home.
 
-## Which setups we have run
+## Which setups have been run
 
-The pod's own tests drive the plugin with an MCP client over Streamable HTTP and the bearer token, the way the Claude Code setup below connects, and run the stdio bridge against a test server. A client with the right token connects and lists the seven tools; a missing or wrong token gets 401. The client setups below follow each client's current documentation and have not been run against a pod yet.
+The pod's own tests drive the plugin with an MCP client over Streamable HTTP and the bearer token, the way the Claude Code setup below connects, and run the stdio bridge against a test server. A client with the right token connects and lists the nine tools; a missing or wrong token gets 401. A generic MCP client has also used a running pod the same way: it started a session, listed the tools and called them, and without the token it got 401. The named clients below follow each client's current documentation; Claude Code, Claude Desktop and claude.ai themselves have not been run against a pod yet.
 
 ## Claude Code
 

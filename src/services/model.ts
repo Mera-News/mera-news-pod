@@ -15,11 +15,13 @@ export function createModelService(cfg: LoadedConfig, fetchFn: typeof fetch = gl
       const asked = (body ?? {}) as Record<string, unknown>;
       if (asked.tools !== undefined) throw new PodError('tools_not_allowed', 'This endpoint does not take tools.', 'send the messages without a tools field');
       if (!Array.isArray(asked.messages)) throw new PodError('bad_request', 'The request needs a messages list.', 'send a messages list');
-      const sent: Record<string, unknown> = { model: cfg.ai.model };
+      const ai = cfg.ai;
+      if (!ai) throw new PodError('no_ai_service', 'No AI service is set.', 'set ai.baseUrl and ai.model in pod.json and restart the pod');
+      const sent: Record<string, unknown> = { model: ai.model };
       for (const field of PASSED) if (asked[field] !== undefined) sent[field] = asked[field];
-      return fetchFn(`${cfg.ai.baseUrl}/chat/completions`, {
+      return fetchFn(`${ai.baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...(cfg.ai.apiKey ? { authorization: `Bearer ${cfg.ai.apiKey}` } : {}) },
+        headers: { 'content-type': 'application/json', ...(ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {}) },
         body: JSON.stringify(sent),
         redirect: 'error',
         signal,

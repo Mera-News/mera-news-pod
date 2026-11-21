@@ -72,7 +72,7 @@ function readHarness(cfg: LoadedConfig) {
     folder: 'user',
     file: { params: {}, ...file, extends: file.extends ?? 'cloud-base' },
     slots,
-    mapping: { [`openai:${cfg.ai.model}`]: 'user' },
+    mapping: cfg.ai ? { [`openai:${cfg.ai.model}`]: 'user' } : {},
   };
 }
 
@@ -116,15 +116,29 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
     const { createOpenAiTransport } = require('mera-news-client/dist/lib/llm/openai-transport') as {
       createOpenAiTransport(config: Record<string, unknown>): { inFlight(): number };
     };
-    const transport = createOpenAiTransport({
-      baseUrl: cfg.ai.baseUrl,
-      apiKey: cfg.ai.apiKey,
-      model: cfg.ai.model,
-      concurrency: cfg.ai.concurrency,
-      callTimeoutMs: cfg.ai.callTimeoutMs,
-      harnessFolder: harness ? 'user' : undefined,
-    });
-    (host as Record<string, unknown>).llmTransport = transport;
+    // The transport for the AI service in pod.json, or, with none, one that refuses every call.
+    if (cfg.ai) {
+      (host as Record<string, unknown>).llmTransport = createOpenAiTransport({
+        baseUrl: cfg.ai.baseUrl,
+        apiKey: cfg.ai.apiKey,
+        model: cfg.ai.model,
+        concurrency: cfg.ai.concurrency,
+        callTimeoutMs: cfg.ai.callTimeoutMs,
+        harnessFolder: harness ? 'user' : undefined,
+      });
+    } else {
+      // Without a transport the client falls back to Mera's gateway, so this one refuses every call at once.
+      const err = Object.assign(new Error('No AI service is set in pod.json.'), { code: 'no_ai_service' });
+      (host as Record<string, unknown>).llmTransport = {
+        complete: () => Promise.reject(err),
+        batch: () => Promise.reject(err),
+        // eslint-disable-next-line require-yield
+        async *chat() {
+          throw err;
+        },
+        asyncJobs: false,
+      };
+    }
     require('mera-news-client/dist/lib/database/index');
     for (const name of TASK_MODULES) require(`mera-news-client/dist/lib/scheduler/tasks/${name}-task`);
     const { inferenceQueue } = require('mera-news-client/dist/lib/inference/InferenceQueue') as { inferenceQueue: { start(): Promise<void>; stop(): Promise<void> } };
@@ -138,7 +152,11 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
     const control = createControl(cfg, env);
     control.apply();
     initNetworkListener();
-    const stopClient = startClient({ afterHydrate: () => void inferenceQueue.start().catch((e) => log('error', `The inference queue did not start: ${(e as Error).message}`)) });
+    const stopClient = startClient({
+      afterHydrate: () => {
+        if (cfg.ai) void inferenceQueue.start().catch((e) => log('error', `The inference queue did not start: ${(e as Error).message}`));
+      },
+    });
     cleanups.push(async () => {
       stopClient();
       await inferenceQueue.stop();
@@ -157,7 +175,7 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
     const everyMs = Number(env.MERA_POD_INTERVAL_SECONDS) * 1000 || undefined;
     guards.appState.startCycle(everyMs, () => control.get().paused);
     cleanups.push(() => guards.appState.stop());
-    const made = options.createServices?.({ cfg, control, log, keyRefused: (server) => guards.refusedBy(server === 'ai' ? cfg.ai.origin : cfg.dataServer.origin) });
+    const made = options.createServices?.({ cfg, control, log, keyRefused: (server) => guards.refusedBy(server === 'ai' ? (cfg.ai?.origin ?? '') : cfg.dataServer.origin) });
     if (made?.stop) cleanups.push(() => made.stop!());
     const plugins = await loadPlugins(cfg, {
       services: made?.services ?? unavailableServices,

@@ -66,8 +66,10 @@ export function createControl(cfg: LoadedConfig, env: NodeJS.ProcessEnv = proces
   // A pause stops every read and every model call the pod starts on its own: the reading tasks and
   // the queued background jobs. A topic run for a fact the person just added still goes ahead.
   const applyPaused = () => {
-    for (const name of READING_TASKS) (state.paused ? scheduler().pauseTask(name) : scheduler().resumeTask(name));
-    queue().hold(state.paused ? BACKGROUND_JOB_TYPES : []);
+    // With no AI service the tasks stay held whatever the person chose: they would need a model.
+    const held = state.paused || !cfg.ai;
+    for (const name of READING_TASKS) (held ? scheduler().pauseTask(name) : scheduler().resumeTask(name));
+    queue().hold(held ? BACKGROUND_JOB_TYPES : []);
   };
   const applyEvery = () => {
     const frequency = testSeconds ? testSeconds * 1000 : state.everyMinutes * 60_000;

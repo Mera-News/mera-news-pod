@@ -68,12 +68,18 @@ export interface Snapshot {
   readingNow: boolean;
   readFailing: boolean;
   aiKeyRefused: boolean;
+  /** True when pod.json sets no AI service. */
+  noAi?: boolean;
   dataKeyRefused: boolean;
   /** Where an unreadable pick history was moved at start. */
   picksSetAside?: string;
 }
 
+export const NO_AI_FIX =
+  'No AI service is set, so the pod makes no picks. News search and the latest news still work. To get picks, set ai.baseUrl and ai.model in pod.json and restart the pod.';
+
 export interface SnapshotInputs {
+  noAi?: boolean;
   keyRefused(server: 'ai' | 'data'): boolean;
   picksSetAside?: string;
 }
@@ -99,12 +105,15 @@ export async function takeSnapshot(inputs: SnapshotInputs): Promise<Snapshot> {
     // A failed read stays recorded until the next one succeeds.
     readFailing: AppScheduler._msSinceFailure('feed-sync') !== null,
     aiKeyRefused: inputs.keyRefused('ai'),
+    noAi: inputs.noAi,
     dataKeyRefused: inputs.keyRefused('data'),
     picksSetAside: inputs.picksSetAside,
   };
 }
 
 export function problemsOf(s: Snapshot): PodProblem[] {
+  // Nothing else can be said when no AI service is set: no read runs, so the rest would only mislead.
+  if (s.noAi) return [{ code: 'no_ai_service', who: 'person', fix: NO_AI_FIX }];
   const problems: PodProblem[] = [];
   if (s.aiKeyRefused) {
     problems.push({
@@ -155,7 +164,7 @@ export function when(nextReadAt: string | null, now = Date.now()): string {
 export const nextReadAtOf = (s: Snapshot, paused: boolean): string | null =>
   paused || s.lastRunMs === null ? null : new Date(s.lastRunMs + s.frequencyMs).toISOString();
 
-const BLOCKING = ['ai_key_refused', 'data_key_refused', 'read_failing', 'no_topics'];
+const BLOCKING = ['no_ai_service', 'ai_key_refused', 'data_key_refused', 'read_failing', 'no_topics'];
 
 /** `returned`: how many picks the reply carries. A reply with picks is never `first_read_pending`; a problem or a pause still says so. */
 export function judge(s: Snapshot, paused: boolean, returned = 0, now = Date.now()): { state: SuggestionsState; hint: string; nextReadAt: string | null } {
@@ -204,7 +213,7 @@ export function buildStatus(cfg: LoadedConfig, control: Control, s: Snapshot, pi
         : []),
     ],
     limits: server.limits,
-    ai: { host: new URL(cfg.ai.baseUrl).host, model: cfg.ai.model },
+    ai: cfg.ai ? { host: new URL(cfg.ai.baseUrl).host, model: cfg.ai.model } : null,
     dataServer: { host: new URL(cfg.dataServer.graphqlUrl).host },
   };
 }

@@ -37,19 +37,21 @@ export async function probe(cfg: LoadedConfig, fetchImpl: typeof fetch = fetch):
     problems.push(`The data server at ${host(cfg.dataServer.graphqlUrl)} did not answer. Check dataServer.url in pod.json and that the server is running.`);
   }
 
+  const ai = cfg.ai;
+  if (!ai) return problems;
   try {
-    const res = await fetchImpl(`${cfg.ai.baseUrl}/chat/completions`, {
+    const res = await fetchImpl(`${ai.baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...(cfg.ai.apiKey ? { authorization: `Bearer ${cfg.ai.apiKey}` } : {}) },
-      body: JSON.stringify({ model: cfg.ai.model, messages: [{ role: 'user', content: 'Say ok.' }], max_tokens: 4, stream: false }),
+      headers: { 'content-type': 'application/json', ...(ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {}) },
+      body: JSON.stringify({ model: ai.model, messages: [{ role: 'user', content: 'Say ok.' }], max_tokens: 4, stream: false }),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       redirect: 'error',
     });
-    if (res.status === 401 || res.status === 403) problems.push(`The model endpoint at ${host(cfg.ai.baseUrl)} refused the key. Set aiApiKey in secrets.json.`);
-    else if (res.status === 404) problems.push(`The model endpoint at ${host(cfg.ai.baseUrl)} does not know the model ${cfg.ai.model}. Check ai.baseUrl and ai.model in pod.json.`);
-    else if (!res.ok) problems.push(`The model endpoint at ${host(cfg.ai.baseUrl)} answered with an error (${res.status}). Check ai.baseUrl and ai.model in pod.json.`);
+    if (res.status === 401 || res.status === 403) problems.push(`The model endpoint at ${host(ai.baseUrl)} refused the key. Set aiApiKey in secrets.json.`);
+    else if (res.status === 404) problems.push(`The model endpoint at ${host(ai.baseUrl)} does not know the model ${ai.model}. Check ai.baseUrl and ai.model in pod.json.`);
+    else if (!res.ok) problems.push(`The model endpoint at ${host(ai.baseUrl)} answered with an error (${res.status}). Check ai.baseUrl and ai.model in pod.json.`);
   } catch {
-    problems.push(`The model endpoint at ${host(cfg.ai.baseUrl)} did not answer. Check ai.baseUrl in pod.json and that the model server is running.`);
+    problems.push(`The model endpoint at ${host(ai.baseUrl)} did not answer. Check ai.baseUrl in pod.json and that the model server is running.`);
   }
   return problems;
 }
@@ -83,6 +85,7 @@ function init(home: string): number {
 async function check(home: string): Promise<number> {
   const cfg = loadConfig(home);
   const problems = await probe(cfg);
+  if (!cfg.ai) console.log('No AI service is set: only the news tools work.');
   problems.forEach((line) => console.log(line));
   try {
     const plugins = await loadPlugins(cfg, { services: unavailableServices, write: (_l, line) => console.error(line), podRoot: path.resolve(__dirname, '..') });

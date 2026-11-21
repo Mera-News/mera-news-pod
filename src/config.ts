@@ -16,7 +16,8 @@ export interface PluginEntry {
 /** pod.json as a person writes it. */
 export interface PodConfigFile {
   dataServer: { url: string };
-  ai: { baseUrl: string; model: string; concurrency?: number; callTimeoutSeconds?: number };
+  /** Left out, the pod serves news and runs no AI work. */
+  ai?: { baseUrl: string; model: string; concurrency?: number; callTimeoutSeconds?: number };
   reading?: { everyMinutes?: number; runTimeoutMinutes?: number };
   language?: string;
   region?: string;
@@ -49,7 +50,8 @@ export interface PodPaths {
 export interface LoadedConfig {
   paths: PodPaths;
   dataServer: { graphqlUrl: string; origin: string; apiKey?: string };
-  ai: { baseUrl: string; origin: string; model: string; apiKey?: string; concurrency: number; callTimeoutMs: number };
+  /** Null when pod.json has no ai block: the pod serves news and runs no AI work. */
+  ai: { baseUrl: string; origin: string; model: string; apiKey?: string; concurrency: number; callTimeoutMs: number } | null;
   reading: { everyMinutes: number; runTimeoutMs: number };
   language?: string;
   region?: string;
@@ -150,8 +152,9 @@ export function loadConfig(home: string, env: NodeJS.ProcessEnv = process.env): 
   const dataPath = data.pathname.replace(/\/+$/, '');
   const graphqlUrl = `${data.origin}${dataPath.endsWith('/graphql') ? dataPath : `${dataPath}/graphql`}`;
 
-  if (!file.ai?.baseUrl || !file.ai?.model) throw new ConfigError('ai.baseUrl and ai.model are required in pod.json.');
-  const ai = httpUrl(file.ai.baseUrl, 'ai.baseUrl');
+  const aiFile = file.ai;
+  if (aiFile !== undefined && aiFile !== null && (!aiFile.baseUrl || !aiFile.model)) throw new ConfigError('ai.baseUrl and ai.model are required in pod.json.');
+  const ai = aiFile ? httpUrl(aiFile.baseUrl, 'ai.baseUrl') : null;
 
   const notifyTarget = (entry: { enabled?: boolean; url?: string } | undefined, field: string) => {
     if (!entry?.enabled) return undefined;
@@ -164,20 +167,23 @@ export function loadConfig(home: string, env: NodeJS.ProcessEnv = process.env): 
     throw new ConfigError('plugins must be a list of { "package": "<name or path>" } entries.');
   }
 
-  const aiApiKey = env.MERA_POD_AI_API_KEY || secrets.aiApiKey || undefined;
+  const aiApiKey = ai ? env.MERA_POD_AI_API_KEY || secrets.aiApiKey || undefined : undefined;
   const dataApiKey = env.MERA_POD_DATA_API_KEY || secrets.dataApiKey || undefined;
 
   return {
     paths,
     dataServer: { graphqlUrl, origin: data.origin, apiKey: dataApiKey },
-    ai: {
-      baseUrl: ai.href.replace(/\/+$/, ''),
-      origin: ai.origin,
-      model: file.ai.model,
-      apiKey: aiApiKey,
-      concurrency: whole(file.ai.concurrency, 2, 1, 16, 'ai.concurrency'),
-      callTimeoutMs: whole(file.ai.callTimeoutSeconds, 300, 10, 3600, 'ai.callTimeoutSeconds') * 1000,
-    },
+    ai:
+      ai && aiFile
+        ? {
+            baseUrl: ai.href.replace(/\/+$/, ''),
+            origin: ai.origin,
+            model: aiFile.model,
+            apiKey: aiApiKey,
+            concurrency: whole(aiFile.concurrency, 2, 1, 16, 'ai.concurrency'),
+            callTimeoutMs: whole(aiFile.callTimeoutSeconds, 300, 10, 3600, 'ai.callTimeoutSeconds') * 1000,
+          }
+        : null,
     reading: {
       everyMinutes: whole(file.reading?.everyMinutes, 15, MIN_EVERY_MINUTES, MAX_EVERY_MINUTES, 'reading.everyMinutes'),
       runTimeoutMs: whole(file.reading?.runTimeoutMinutes, 30, 1, 240, 'reading.runTimeoutMinutes') * 60_000,

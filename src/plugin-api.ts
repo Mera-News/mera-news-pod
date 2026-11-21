@@ -107,7 +107,8 @@ export interface PodStatus {
   problems: PodProblem[];
   /** Features the configured data server does not offer, by plain name. */
   limits: string[];
-  ai: { host: string; model: string };
+  /** Null when the pod has no AI service. */
+  ai: { host: string; model: string } | null;
   dataServer: { host: string };
 }
 

@@ -12,7 +12,7 @@ import { createSecureStore } from './secure-file';
 import { consoleSink, createRedactor, createTelemetry, type Level, type Sink } from './telemetry';
 
 export interface HostDeps {
-  /** The client's OpenAI-compatible transport, built by the caller from `cfg.ai`. */
+  /** The client's OpenAI-compatible transport, built by the caller from `cfg.ai`; none when the pod has no AI service. */
   llmTransport: unknown;
   /** Where log lines go. Default: the console. */
   sink?: Sink;
@@ -120,5 +120,5 @@ export function createNodeHost(cfg: LoadedConfig, deps: HostDeps) {
 
 /** The origins the client's fetch may reach: what the config names, the Mera News app notifier included when on. */
 export function allowedOrigins(cfg: Pick<LoadedConfig, 'dataServer' | 'ai' | 'notify'>): string[] {
-  return [cfg.dataServer.origin, cfg.ai.origin, cfg.notify.ntfy?.origin, cfg.notify.webhook?.origin, cfg.notify.meraNewsApp?.origin].filter((o): o is string => !!o);
+  return [cfg.dataServer.origin, cfg.ai?.origin, cfg.notify.ntfy?.origin, cfg.notify.webhook?.origin, cfg.notify.meraNewsApp?.origin].filter((o): o is string => !!o);
 }

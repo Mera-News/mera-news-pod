@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ConfigError, loadConfig, podHome } from '../../src/config';
+import { allowedOrigins } from '../../src/host';
 
 function home(podJson: unknown, secrets?: unknown, secretsMode = 0o600): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pod-config-'));
@@ -30,7 +31,7 @@ test('defaults, absolute paths and the GraphQL address with or without /graphql'
   assert.equal(c.dataServer.origin, 'http://127.0.0.1:3002');
   assert.equal(c.dataServer.apiKey, undefined);
   assert.equal(c.reading.everyMinutes, 15);
-  assert.equal(c.ai.origin, 'http://127.0.0.1:11434');
+  assert.equal(c.ai!.origin, 'http://127.0.0.1:11434');
   assert.equal(c.paths.dbFile, path.join(dir, 'data', 'mera.db'));
   assert.ok(path.isAbsolute(c.paths.dbFile));
   assert.deepEqual(c.plugins, []);
@@ -42,7 +43,7 @@ test('defaults, absolute paths and the GraphQL address with or without /graphql'
 test('secrets come from secrets.json, env wins, and every value is listed for redaction', () => {
   const dir = home(minimal, { aiApiKey: 'file-ai', dataApiKey: 'file-data' });
   const c = loadConfig(dir, { MERA_POD_AI_API_KEY: 'env-ai' });
-  assert.equal(c.ai.apiKey, 'env-ai');
+  assert.equal(c.ai!.apiKey, 'env-ai');
   assert.equal(c.dataServer.apiKey, 'file-data');
   assert.deepEqual([...c.secrets].sort(), ['env-ai', 'file-data']);
 });
@@ -58,6 +59,16 @@ test('plain errors for a missing file, a bad address and an interval out of rang
   assert.throws(() => loadConfig(home({ ...minimal, ai: { baseUrl: 'ftp://x', model: 'm' } }), {}), /ai\.baseUrl/);
   assert.throws(() => loadConfig(home({ ...minimal, reading: { everyMinutes: 2 } }), {}), /between 5 and 1440/);
   assert.throws(() => loadConfig(home({ ...minimal, plugins: [{ package: '' }] }), {}), /plugins/);
+});
+
+test('pod.json without ai loads with ai null; an incomplete ai still fails', () => {
+  const c = loadConfig(home({ dataServer: minimal.dataServer }, { aiApiKey: 'ignored' }), { MERA_POD_AI_API_KEY: 'ignored-too' });
+  assert.equal(c.ai, null);
+  assert.deepEqual(c.secrets, []);
+  assert.deepEqual(allowedOrigins(c), ['http://127.0.0.1:3002']);
+  for (const ai of [{}, { baseUrl: 'http://127.0.0.1:11434/v1' }, { model: 'm' }]) {
+    assert.throws(() => loadConfig(home({ dataServer: minimal.dataServer, ai }), {}), /ai\.baseUrl and ai\.model are required/);
+  }
 });
 
 test('notify.meraNewsApp on needs an https origin, and the error names the key', () => {

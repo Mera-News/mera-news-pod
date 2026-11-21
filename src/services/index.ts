@@ -19,7 +19,7 @@ export { PodError } from './ledger';
 
 export function createServices(context: ServicesContext): { services: PodServices; stop(): void } {
   const { cfg, control, log } = context;
-  const snapshotInputs = { keyRefused: context.keyRefused, picksSetAside: undefined as string | undefined };
+  const snapshotInputs = { keyRefused: context.keyRefused, noAi: !cfg.ai, picksSetAside: undefined as string | undefined };
   const baseLedger = createLedger(cfg.paths.picksFile);
   snapshotInputs.picksSetAside = baseLedger.setAside;
   const changes = createEvents((line) => log('warning', line));

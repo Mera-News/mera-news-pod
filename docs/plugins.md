@@ -6,7 +6,7 @@ Plugins you write are yours. Share them as you like.
 
 ## Start from the starter
 
-The quickest start is to copy the `starter` package from [mera-news-pod-plugins](https://github.com/Mera-News/mera-news-pod-plugins/tree/dev/packages/starter). It is one file. It serves a local page that lists your picks, and three JSON routes (`/picks`, `/profile`, `/status`) behind a token file, on `127.0.0.1` only. Read it top to bottom, then change it.
+The quickest start is to copy the `starter` package from [mera-news-pod-plugins](https://github.com/Mera-News/mera-news-pod-plugins/tree/main/packages/starter). It is one file. It serves a local page that lists your picks, and three JSON routes (`/picks`, `/profile`, `/status`) behind a token file, on `127.0.0.1` only. Read it top to bottom, then change it.
 
 ## Publishers' content
 
@@ -83,7 +83,7 @@ Restart the pod after a change, and run `node build/cli.js check` to see each pl
 
 ## Testing a plugin
 
-Add the pod as a development dependency (`"mera-news-pod": "git+https://github.com/Mera-News/mera-news-pod.git#dev"`). `mera-news-pod/testing` holds the fakes the pod tests itself with, each a local server:
+Add the pod as a development dependency (`"mera-news-pod": "git+https://github.com/Mera-News/mera-news-pod.git#main"`). `mera-news-pod/testing` holds the fakes the pod tests itself with, each a local server:
 
 - `startFakeDataServer({ articles, topics })`: a data server that answers the public news schema with the articles you give it.
 - `startFakeModel({ responder })`: an AI service that answers the same input with the same reply. `defaultResponder` makes topics from a fact's words and rates articles from their text.
@@ -98,4 +98,4 @@ Start a real pod against them, as the plugins in mera-news-pod-plugins do in the
 
 ## Sharing a plugin
 
-Keep it in your own repository and point people at it, or add it to the [community list or this collection](https://github.com/Mera-News/mera-news-pod-plugins/blob/dev/CONTRIBUTING.md#submitting-a-plugin).
+Keep it in your own repository and point people at it, or add it to the [community list or this collection](https://github.com/Mera-News/mera-news-pod-plugins/blob/main/CONTRIBUTING.md#submitting-a-plugin).

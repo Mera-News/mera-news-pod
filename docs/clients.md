@@ -65,6 +65,16 @@ Or in `.mcp.json`, which Claude Code expands `${MERA_POD_TOKEN}` in:
 
 with `MERA_POD_TOKEN` set to the token.
 
+## The Mera News plugin
+
+The plugin is the pod and the MCP plugin in one program that your AI app starts and stops. It needs no clone and no terminal. It writes `~/.mera-news-pod/pod.json` on its first run, pointed at Mera News (`https://api.mera.news`), and connects to a pod already running for that folder instead of starting another.
+
+- **Claude Desktop:** download `mera-news.mcpb` from the [plugins' latest release](https://github.com/Mera-News/mera-news-pod-plugins/releases) and open it. Claude Desktop asks for your Mera News key and keeps it in the system's secure store.
+- **Claude Code:** `/plugin marketplace add Mera-News/mera-news-pod-plugins`, then `/plugin install mera-news@mera-news`. It asks for the key.
+- **Grok Build, Codex, OpenClaw:** add `Mera-News/mera-news-pod-plugins` as a marketplace in the app, then install `mera-news`. Put the key in `~/.mera-news-pod/secrets.json` as `{ "dataApiKey": "<your key>" }`. These follow each app's published plugin format and are tested by the community.
+
+The sections below connect a pod you run yourself.
+
 ## Claude Desktop, pod on the same machine
 
 Claude Desktop starts local servers as commands, so it goes through a small bridge that reads the token and forwards to the running pod. Open Settings, then Developer, then Edit Config, and add to `claude_desktop_config.json`:

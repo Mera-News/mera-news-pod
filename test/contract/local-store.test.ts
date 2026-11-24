@@ -83,7 +83,7 @@ test('the pod reads the one-computer store: first picks, the read tools, and eve
     servers.push(feeds);
     await new Promise<void>((r) => feeds.listen(0, '127.0.0.1', r));
     const feedHost = `127.0.0.1:${(feeds.address() as AddressInfo).port}`;
-    for (const args of [['config', 'set', 'contact', 'ci@example.org'], ['config', 'set', 'feeds.allowHosts', feedHost], ...Object.keys(FEEDS).map((f) => ['feeds', 'add', `http://${feedHost}${f}`])]) {
+    for (const args of [['config', 'set', 'feeds.allowHosts', feedHost], ...Object.keys(FEEDS).map((f) => ['feeds', 'add', `http://${feedHost}${f}`])]) {
       const r = await store(...args);
       assert.equal(r.code, 0, `${args.join(' ')}: ${r.out}`);
     }

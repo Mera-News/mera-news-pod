@@ -219,7 +219,8 @@ function resolversFor(options: FakeDataServerOptions) {
               {
                 topicText: t.text,
                 articleIds: ids,
-                matchMeta: ids.map((id) => ({ articleId: id, vectorScore: 0.8, textScore: null, stableClusterId: `stable-${id}` })),
+                // Reports of one story share its stable id, as on the server.
+                matchMeta: ids.map((id) => ({ articleId: id, vectorScore: 0.8, textScore: null, stableClusterId: `stable-${articles.find((a) => a._id === id)?.story_key ?? id}` })),
                 nextCursor: null,
                 hasNextPage: false,
               },

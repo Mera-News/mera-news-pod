@@ -17,6 +17,7 @@ export const unavailableServices: PodServices = {
   suggestions: { get: unavailable },
   reading: { status: unavailable, set: unavailable, readNow: unavailable },
   aiService: { set: unavailable },
+  stories: { forProfile: unavailable, judge: unavailable },
   commands: { run: unavailable },
   model: { chatCompletions: unavailable },
   news: { graphql: unavailable },

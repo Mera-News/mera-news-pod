@@ -43,6 +43,8 @@ export interface PodPaths {
   secureFile: string;
   controlFile: string;
   picksFile: string;
+  /** The verdict on each story the person's assistant judged, and the stories it was shown. */
+  verdictsFile: string;
   lockFile: string;
   pluginsDir: string;
 }
@@ -83,6 +85,7 @@ export function podPaths(home: string): PodPaths {
     secureFile: path.join(data, 'secure.json'),
     controlFile: path.join(data, 'control.json'),
     picksFile: path.join(data, 'picks.json'),
+    verdictsFile: path.join(data, 'verdicts.json'),
     lockFile: path.join(data, 'pod.lock.db'),
     pluginsDir: path.join(data, 'plugins'),
   };

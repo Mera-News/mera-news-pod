@@ -13,6 +13,7 @@ import { readFeed } from './picks';
 import { createModelService } from './model';
 import { createNewsService } from './news';
 import { createProfile, readSetup } from './profile';
+import { createStories } from './stories';
 import { buildStatus, fetchLimits, judge, takeSnapshot } from './status';
 import { watchFinishedStories, watchTopicsReady } from './watchers';
 import { client } from './client';
@@ -91,13 +92,17 @@ export function createServices(context: ServicesContext): { services: PodService
   // Served while reading is paused: it only reads what is already stored.
   const display = createDisplayService();
   const ai = createAiService(cfg.paths);
+  const profile = createProfile(() => dataServer, !!cfg.ai);
+  const news = createNewsService(cfg);
   const services: PodServices = {
     aiService: ai.service,
     commands: createCommands(log, display),
-    profile: createProfile(() => dataServer, !!cfg.ai),
+    profile,
     // Chat is the person's own action, so it is served while reading is paused.
     model: createModelService(cfg),
-    news: createNewsService(cfg),
+    news,
+    // Served while reading is paused, like the news: the assistant or the person asks for it.
+    stories: createStories({ news, profile, file: cfg.paths.verdictsFile, onChange: changes.poke }),
     display,
     events: changes.events,
 

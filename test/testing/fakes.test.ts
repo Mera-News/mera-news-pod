@@ -123,7 +123,7 @@ describe('fake data server', () => {
         { _id: 's2', title: 'Storm two', story_key: 'storm', publication_name: 'Paper B', language_code: 'nl' },
         { _id: 's3', title: 'Storm three', story_key: 'storm', publication_name: 'Paper C' },
       ],
-      topics: {},
+      topics: { storms: ['s1', 'x1', 's3'] },
     });
     try {
       const top = (after?: string) =>
@@ -151,6 +151,9 @@ describe('fake data server', () => {
 
       const memberships = (await (await query(server, 'query($ids: [ID!]!){ clusterMembershipsForArticles(articleIds: $ids){ articleId clusters { stableClusterId } } }', { ids: ['s1', 's3', 'x1'] })).json()) as any;
       assert.deepEqual(memberships.data.clusterMembershipsForArticles.map((m: any) => m.clusters[0].stableClusterId), ['stable-storm', 'stable-storm', 'stable-x1']);
+
+      const persona = (await (await query(server, 'query($q: PersonaQueryInput!){ articleIdsForPersona(query: $q){ topicResults { matchMeta { articleId stableClusterId } } } }', { q: { limitPerTopic: 20, topics: [{ text: 'storms' }] } })).json()) as any;
+      assert.deepEqual(persona.data.articleIdsForPersona.topicResults[0].matchMeta.map((m: any) => m.stableClusterId), ['stable-storm', 'stable-x1', 'stable-storm']);
     } finally {
       await server.close();
     }

@@ -49,10 +49,11 @@ The types are in `mera-news-pod/plugin-api`. Import types only: a plugin never i
 | `model` | `chatCompletions(body, signal)` sends an OpenAI-style chat request to the pod's AI service. |
 | `news` | `graphql(body)` asks the data server, for the news operations the pod allows. |
 | `aiService` | `set({ baseUrl, model, apiKey })` saves the person's OpenAI-compatible AI service: the address (https, or http on this computer) and model in `pod.json`, the key in `secrets.json`. Leave out `apiKey` to keep the saved key; it is kept only for the same origin. The answer is `{ set: true }` and never the key. The pod reads these at start, so the service runs after the pod restarts, and `reading.status()` names it as `aiAfterRestart` until then. |
+| `stories` | `forProfile({ after, limit, peek })` pages through every story that matches the person's topics, reports of one event merged, each with its verdict when it has one, plus summary numbers: articles, stories, duplicates merged, matches per topic and per fact, picked, left out, publishers and languages. Without `peek` the unjudged stories it returns wait 72 hours before a later run returns them again; a page that only shows stories passes `peek: true`. `judge([{ id, verdict, level, reason }])` saves one verdict per story, picked (with a level) or left out, each with a one-sentence reason. A story keeps its first verdict. A pick becomes one of the pod's own picks, so `suggestions.get`, the notifiers and a paired phone get it; a story left out never shows as a pick. |
 | `display`, `commands` | The tables the Mera News app shows, and the named changes it makes. The sync plugin uses them; pairing the app with a pod is not available yet. |
 | `events` | `on('changed', listener)` after a change to what the app's tables hold (the profile and the picks among them) or to the pick history, at most every two seconds. `on('notify', listener)` with each new `emergency` and `high` pick. Both return a function that stops listening. |
 
-`aiService`, `display`, `commands`, `events`, `reading.readNow` and `profile.addTopics` are in version 2 only. A pod error carries a `code`, a `message` and a `next` step you can show as they are.
+`aiService`, `stories`, `display`, `commands`, `events`, `reading.readNow` and `profile.addTopics` are in version 2 only. A pod error carries a `code`, a `message` and a `next` step you can show as they are.
 
 ### Reviewing topics
 

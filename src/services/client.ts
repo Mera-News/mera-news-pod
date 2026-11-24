@@ -1,11 +1,14 @@
 // The client modules the services load, each as a literal require: a bundler follows only literal
 // paths. Each loads on first use, after boot has registered the host.
 const MODULES = {
+  'article-service': () => require('mera-news-client/dist/lib/article-service'),
   'chat-tools/fact-commit': () => require('mera-news-client/dist/lib/chat-tools/fact-commit'),
   'chat-tools/tool-handlers': () => require('mera-news-client/dist/lib/chat-tools/tool-handlers'),
   'database/index': () => require('mera-news-client/dist/lib/database/index'),
   'database/schema': () => require('mera-news-client/dist/lib/database/schema'),
+  'database/services/article-suggestion-persist': () => require('mera-news-client/dist/lib/database/services/article-suggestion-persist'),
   'database/services/article-suggestion-reads': () => require('mera-news-client/dist/lib/database/services/article-suggestion-reads'),
+  'database/services/article-suggestion-scoring-writes': () => require('mera-news-client/dist/lib/database/services/article-suggestion-scoring-writes'),
   'database/services/fact-service': () => require('mera-news-client/dist/lib/database/services/fact-service'),
   'database/services/publication-pref-ui-actions': () => require('mera-news-client/dist/lib/database/services/publication-pref-ui-actions'),
   'database/services/topic-decline-service': () => require('mera-news-client/dist/lib/database/services/topic-decline-service'),
@@ -13,6 +16,7 @@ const MODULES = {
   'database/services/topic-service': () => require('mera-news-client/dist/lib/database/services/topic-service'),
   'mera-harness/core/combined-fact': () => require('mera-news-client/dist/lib/mera-harness/core/combined-fact'),
   'mera-harness/core/fact-normalise': () => require('mera-news-client/dist/lib/mera-harness/core/fact-normalise'),
+  'news-harness/core/config': () => require('mera-news-client/dist/lib/news-harness/core/config'),
   'news-harness/feed-select/ownership': () => require('mera-news-client/dist/lib/news-harness/feed-select/ownership'),
   'news-harness/persona-management/fact-conflict': () => require('mera-news-client/dist/lib/news-harness/persona-management/fact-conflict'),
   'news-harness/persona-management/fact-rules': () => require('mera-news-client/dist/lib/news-harness/persona-management/fact-rules'),

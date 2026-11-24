@@ -13,6 +13,7 @@ const noServices: PodServices = {
   suggestions: { get: async () => ({ state: 'ok', hint: '', nextReadAt: null, picks: [], cursor: '', more: false }) },
   reading: { status: async () => ({}) as never, set: async () => ({}) as never, readNow: async () => 'ran' },
   aiService: { set: async () => ({ set: true }) },
+  stories: { forProfile: async () => ({}) as never, judge: async () => ({ saved: [], already: [], refused: [] }) },
   commands: { run: async () => ({ results: [], snapshot: { schemaVersion: 0, registry: 0, tables: {} } }) },
   display: { snapshot: async () => ({ schemaVersion: 0, registry: 0, tables: {} }), versions: () => ({ schemaVersion: 0, registry: 0 }) },
   events: { on: () => () => {} },

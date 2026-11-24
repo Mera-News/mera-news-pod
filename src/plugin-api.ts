@@ -108,6 +108,83 @@ export interface PickView {
   facts: string[];
 }
 
+export type Verdict = 'picked' | 'left_out';
+
+/** What was decided about one story, and why: one sentence on why it matters, or why it was left out. */
+export interface StoryVerdict {
+  verdict: Verdict;
+  reason: string;
+  /** Set for every pick. */
+  level?: PickLevel;
+  /** `assistant`: through `stories.judge`. `pod`: the pod's own AI service picked it. */
+  by: 'assistant' | 'pod';
+  /** ISO time it was judged, for a verdict the pod stored. */
+  at?: string;
+}
+
+/** One story that matched the person's topics: its lead report, never any article text. */
+export interface ProfileStory {
+  /** The lead article's id. Pass it to `stories.judge`. */
+  id: string;
+  /** The story's key: every report of one event shares it. */
+  story: string;
+  title: string;
+  /** The English headline, when it differs from `title`. */
+  titleEn?: string;
+  link: string;
+  publisher: string;
+  publishedAt: string;
+  language: string;
+  /** The publisher's image, https only. */
+  image?: string;
+  /** Reports of this story among the matches. */
+  reports: number;
+  /** The facts whose topics matched it. */
+  facts: { id: string; statement: string }[];
+  topics: string[];
+  /** Absent while nobody has judged it. */
+  verdict?: StoryVerdict;
+}
+
+export interface StoriesSummary {
+  /** Mera News searches the news of this many hours. */
+  windowHours: number;
+  /** Articles that matched a topic, and the stories they make once reports of one event are merged. */
+  articles: number;
+  stories: number;
+  merged: number;
+  topics: { text: string; matches: number }[];
+  /** Per fact: the stories that matched it, and how many of those were picked and left out. */
+  facts: { id: string; statement: string; matched: number; picked: number; leftOut: number }[];
+  picked: number;
+  leftOut: number;
+  unjudged: number;
+  /** Publishers and languages of the stories this run has returned so far: the last page carries every one. */
+  publishers: number;
+  languages: number;
+  /** False when the news server had more pages of matches than one run reads. */
+  complete: boolean;
+}
+
+export interface StoriesPage {
+  /** The run this page belongs to: `after` set to `<run>.0` reads it again from the start, with fresh verdicts. */
+  run: string;
+  summary: StoriesSummary;
+  stories: ProfileStory[];
+  /** Pass as `after` for the next page; absent on the last one. */
+  nextCursor?: string;
+  /** Unjudged stories left out of this run because an earlier run (not a peek) returned them. */
+  shownBefore: number;
+}
+
+export interface JudgeResult {
+  saved: { id: string; verdict: Verdict }[];
+  /** Stories judged before: the first verdict stands. */
+  already: { id: string; verdict: Verdict }[];
+  /** Not saved: `unknown_story` (no such article) or `reason_not_grounded` (a pick's reason shares no word with its headline). */
+  refused: { id: string; code: string; message: string }[];
+}
+
 export type SuggestionsState = 'ok' | 'no_facts' | 'topics_pending' | 'first_read_pending' | 'paused' | 'problem';
 
 export interface SuggestionsReply {
@@ -226,6 +303,26 @@ export interface PodServices {
      * returned. A bad value fails with code `bad_input` and changes nothing.
      */
     set(change: { baseUrl: string; model: string; apiKey?: string }): Promise<{ set: true }>;
+  };
+  /** Contract version 2 and later. */
+  stories: {
+    /**
+     * One page of every story that matches the person's topics, each with its verdict when it has one.
+     * A call without `after` starts a run (one made in the last minute for the same topics is reused);
+     * `after` continues it. `limit` is 0 to 50 (default 20); 0 returns the summary only. Without
+     * `peek`, the unjudged stories returned are recorded as shown, and later runs leave them out for 72
+     * hours; `peek` records nothing, for a page that only shows stories. `fits` works as in
+     * `suggestions.get`, and is given the page's summary too. An `after` from a run the pod no longer holds fails with `run_expired`.
+     */
+    forProfile(options?: { after?: string; limit?: number; peek?: boolean; fits?: (stories: ProfileStory[], summary: StoriesSummary) => boolean }): Promise<StoriesPage>;
+    /**
+     * Saves one verdict per story, by the `id` `forProfile` gave: picked (with a level) or left out,
+     * each with a one-sentence reason. A story keeps its first verdict, whichever report is named. A
+     * pick becomes one of the pod's own picks, so `suggestions.get`, the notifiers and a paired phone
+     * get it; a story left out never shows as a pick. At most 50 at once; a bad item fails the call
+     * with `bad_input` before anything is saved.
+     */
+    judge(verdicts: { id: string; verdict: Verdict; reason: string; level?: PickLevel }[]): Promise<JudgeResult>;
   };
   /** Contract version 2 and later. */
   commands: {

@@ -114,6 +114,48 @@ describe('fake data server', () => {
     assert.equal(bad.errors[0].extensions.code, 'BAD_WINDOW');
   });
 
+  it('groups articles that share a story_key into one story: one headline, pages by cursor, every report in the story', async () => {
+    const server = await startFakeDataServer({
+      schemaPath: defaultSchemaPath(),
+      articles: [
+        { _id: 's1', title: 'Storm one', story_key: 'storm', publication_name: 'Paper A' },
+        { _id: 'x1', title: 'Alone' },
+        { _id: 's2', title: 'Storm two', story_key: 'storm', publication_name: 'Paper B', language_code: 'nl' },
+        { _id: 's3', title: 'Storm three', story_key: 'storm', publication_name: 'Paper C' },
+      ],
+      topics: {},
+    });
+    try {
+      const top = (after?: string) =>
+        query(server, 'query($a: String){ topHeadlinesForCountry(first: 1, after: $a){ headlines { clusterSize stableClusterId article { _id original_language_code publicationSource { publication_name } } } pageInfo { endCursor hasNextPage } } }', { a: after }).then((r) => r.json() as Promise<any>);
+      const first = (await top()).data.topHeadlinesForCountry;
+      assert.deepEqual(first.headlines, [{ clusterSize: 3, stableClusterId: 'stable-storm', article: { _id: 's1', original_language_code: 'en', publicationSource: { publication_name: 'Paper A' } } }]);
+      assert.deepEqual(first.pageInfo, { endCursor: 's1', hasNextPage: true });
+      const second = (await top('s1')).data.topHeadlinesForCountry;
+      assert.deepEqual(second.headlines.map((h: any) => [h.clusterSize, h.stableClusterId, h.article._id]), [[1, 'stable-x1', 'x1']]);
+      assert.equal(second.pageInfo.hasNextPage, false);
+      assert.equal((await top('nope')).errors[0].extensions.code, 'BAD_USER_INPUT');
+
+      const story = (after?: string) =>
+        query(server, 'query($id: ID!, $a: String){ newsClusterForArticle(articleId: $id){ clusterSize articles(first: 2, after: $a){ articles { _id original_language_code publicationSource { publication_name } } pageInfo { endCursor hasNextPage } } } }', { id: 's2', a: after }).then((r) => r.json() as Promise<any>);
+      const reports = (await story()).data.newsClusterForArticle;
+      assert.equal(reports.clusterSize, 3);
+      assert.deepEqual(reports.articles.articles.map((a: any) => [a._id, a.publicationSource.publication_name, a.original_language_code]), [['s1', 'Paper A', 'en'], ['s2', 'Paper B', 'nl']]);
+      assert.deepEqual(reports.articles.pageInfo, { endCursor: 's2', hasNextPage: true });
+      assert.deepEqual((await story('s2')).data.newsClusterForArticle.articles.articles.map((a: any) => a._id), ['s3']);
+      const none = (await (await query(server, '{ newsClusterForArticle(articleId: "zz"){ _id } }')).json()) as any;
+      assert.equal(none.data.newsClusterForArticle, null);
+
+      const sizes = (await (await query(server, 'query($ids: [ID!]!){ articlesForTopicsByIds(articleIds: $ids){ articles { _id maxClusterSize } } }', { ids: ['s2', 'x1'] })).json()) as any;
+      assert.deepEqual(sizes.data.articlesForTopicsByIds.articles, [{ _id: 's2', maxClusterSize: 3 }, { _id: 'x1', maxClusterSize: 1 }]);
+
+      const memberships = (await (await query(server, 'query($ids: [ID!]!){ clusterMembershipsForArticles(articleIds: $ids){ articleId clusters { stableClusterId } } }', { ids: ['s1', 's3', 'x1'] })).json()) as any;
+      assert.deepEqual(memberships.data.clusterMembershipsForArticles.map((m: any) => m.clusters[0].stableClusterId), ['stable-storm', 'stable-storm', 'stable-x1']);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('searchNews finds planted articles by every query word, newest first, capped at 25', async () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ _id: `m${i}`, title: `Rail strike ${i}`, pubDate: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString() }));
     const server = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles: [{ _id: 'x', title: 'Rail only' }, ...many], topics: {} });

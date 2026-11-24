@@ -78,8 +78,8 @@ const withDefaults = (a: FakeArticle, now: string) => ({
   language_code: 'en',
   pubDate: now,
   story_key: null,
-  clusters: [{ clusterId: `c-${a._id}`, confidence: 0.9, stableClusterId: `stable-${a._id}` }],
-  maxClusterSize: 1,
+  // Articles that share a story_key are reports of one story, as the server's clustering groups them.
+  clusters: [{ clusterId: `c-${a.story_key ?? a._id}`, confidence: 0.9, stableClusterId: `stable-${a.story_key ?? a._id}` }],
   geo_tags: [],
   entities: [],
   ...a,
@@ -140,7 +140,8 @@ function resolversFor(options: FakeDataServerOptions) {
   const hydrate = (articleIds: string[]) => ({
     articles: articleIds.flatMap((id) => {
       const found = articles.find((a) => a._id === id);
-      return found ? [withDefaults(found, now)] : [];
+      // The story's size, as the server counts it, unless the article sets its own.
+      return found ? [{ maxClusterSize: reportsOf(found).length, ...withDefaults(found, now) }] : [];
     }),
     dailyLimitReached: false,
     resetAt: null,
@@ -153,6 +154,24 @@ function resolversFor(options: FakeDataServerOptions) {
       if (!byName.has(full.publication_name)) byName.set(full.publication_name, asSource(full.publication_name, full.country_code, now));
     }
     return [...byName.values()];
+  };
+
+  /** A plain article with its language and publication, as the country and story pages send it. */
+  const withSource = (a: FakeArticle) => {
+    const full = withDefaults(a, now);
+    return { ...asNewsArticle(a, now), original_language_code: full.language_code, publicationSource: asSource(full.publication_name, full.country_code, now) };
+  };
+  const reportsOf = (a: FakeArticle) => (a.story_key ? articles.filter((b) => b.story_key === a.story_key) : [a]);
+  /** One keyset page of `list` by article id; an unknown `after` is the server's BAD_USER_INPUT. */
+  const pageOf = <T extends { _id: string }>(list: T[], first: number, after?: string | null) => {
+    let start = 0;
+    if (after != null) {
+      const at = list.findIndex((a) => a._id === after);
+      if (at < 0) throw new GraphQLError('after is not a cursor this server gave out', { extensions: { code: 'BAD_USER_INPUT' } });
+      start = at + 1;
+    }
+    const page = list.slice(start, start + first);
+    return { page, pageInfo: { endCursor: page.at(-1)?._id ?? null, hasNextPage: start + page.length < list.length, pageSize: page.length } };
   };
 
   // Newest first; a missing pubDate is as new as the fake. The sort is stable, so ties keep planted order.
@@ -188,25 +207,8 @@ function resolversFor(options: FakeDataServerOptions) {
     },
     articlesForCountry: ({ countryCode, first, after }: { countryCode?: string | null; first?: number | null; after?: string | null }) => {
       const code = countryCode?.toUpperCase() === 'GLOBAL' ? null : countryCode;
-      const sorted = newestFirst(byCountry(code));
-      let start = 0;
-      if (after != null) {
-        const at = sorted.findIndex((a) => a._id === after);
-        if (at < 0) throw new GraphQLError('after is not a cursor this server gave out', { extensions: { code: 'BAD_USER_INPUT' } });
-        start = at + 1;
-      }
-      const page = sorted.slice(start, start + clamp(first, 20, 1, 50));
-      return {
-        articles: page.map((a) => {
-          const full = withDefaults(a, now);
-          return {
-            ...asNewsArticle(a, now),
-            original_language_code: full.language_code,
-            publicationSource: asSource(full.publication_name, full.country_code, now),
-          };
-        }),
-        pageInfo: { endCursor: page.at(-1)?._id ?? null, hasNextPage: start + page.length < sorted.length, pageSize: page.length },
-      };
+      const { page, pageInfo } = pageOf(newestFirst(byCountry(code)), clamp(first, 20, 1, 50), after);
+      return { articles: page.map(withSource), pageInfo };
     },
     articleIdsForPersona: ({ query }: { query: PersonaQuery }) => ({
       topicResults: query.topics.flatMap((t) => {
@@ -285,15 +287,41 @@ function resolversFor(options: FakeDataServerOptions) {
       vectorIndexState: null,
       embeddingModel: null,
     }),
-    topHeadlinesForCountry: ({ countryCode, first, windowHours }: { countryCode?: string | null; first: number; windowHours: number }) => {
+    // One headline per story, led by its first served report, paged by the lead's id.
+    topHeadlinesForCountry: ({ countryCode, first, after, windowHours }: { countryCode?: string | null; first: number; after?: string | null; windowHours: number }) => {
       if (!WINDOWS.includes(windowHours)) throw new GraphQLError(`windowHours must be one of ${WINDOWS.join(', ')}`, { extensions: { code: 'BAD_WINDOW' } });
       const code = countryCode?.toUpperCase() === 'GLOBAL' ? null : countryCode;
-      const picked = byCountry(code).filter((a) => served.includes(a)).slice(0, first).map((a) => asNewsArticle(a, now));
+      const leads = byCountry(code)
+        .filter((a) => served.includes(a))
+        .filter((a, i, list) => !a.story_key || list.findIndex((b) => b.story_key === a.story_key) === i);
+      const { page, pageInfo } = pageOf(leads, first, after);
+      const picked = page.map(withSource);
       return {
         articles: picked,
-        headlines: picked.map((article) => ({ article, clusterSize: 1, stableClusterId: `stable-${article._id}` })),
+        headlines: page.map((a, i) => ({ article: picked[i], clusterSize: reportsOf(a).length, stableClusterId: `stable-${a.story_key ?? a._id}` })),
         editionBuiltAt: now,
-        pageInfo: { endCursor: null, hasNextPage: false, pageSize: picked.length },
+        pageInfo,
+      };
+    },
+    newsClusterForArticle: ({ articleId }: { articleId: string }) => {
+      const found = articles.find((a) => a._id === articleId);
+      if (!found) return null;
+      const reports = reportsOf(found);
+      const key = found.story_key ?? found._id;
+      return {
+        _id: `c-${key}`,
+        stableClusterId: `stable-${key}`,
+        clusterSize: reports.length,
+        topicConfidence: null,
+        createdAt: now,
+        updatedAt: now,
+        articles: ({ first, after }: { first?: number | null; after?: string | null }) => {
+          const { page, pageInfo } = pageOf(reports, clamp(first, 50, 1, 50), after);
+          return {
+            articles: page.map(withSource),
+            pageInfo,
+          };
+        },
       };
     },
   };

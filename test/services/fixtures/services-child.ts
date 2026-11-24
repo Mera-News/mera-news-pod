@@ -133,6 +133,10 @@ async function main() {
           await database.write(() => row.update((r: any) => Object.assign(r, msg.arg.patch)));
           return reply(null);
         }
+        case 'rowStatus': {
+          const { default: database } = client<{ default: Db }>('database/index');
+          return reply((await database.get('article_suggestions').find(msg.arg)).status);
+        }
         case 'deleteRow': {
           const { default: database } = client<{ default: Db }>('database/index');
           const row = await database.get('article_suggestions').find(msg.arg);

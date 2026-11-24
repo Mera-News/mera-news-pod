@@ -39,7 +39,7 @@ test('news-only: every matching story once per event, judged once, a pick become
     const { summary } = first;
     assert.deepEqual(
       { articles: summary.articles, stories: summary.stories, merged: summary.merged, unjudged: summary.unjudged, windowHours: summary.windowHours, complete: summary.complete, languages: summary.languages, publishers: summary.publishers },
-      { articles: 4, stories: 3, merged: 1, unjudged: 3, windowHours: 48, complete: true, languages: 1, publishers: 3 },
+      { articles: 4, stories: 3, merged: 1, unjudged: 3, windowHours: 48, complete: true, languages: 1, publishers: 4 },
     );
     assert.deepEqual(summary.topics, [{ text: 'utrecht housing', matches: 2 }, { text: 'nurse strikes', matches: 1 }, { text: 'utrecht transport', matches: 1 }]);
     assert.deepEqual(summary.facts.map((f: any) => [f.statement, f.matched, f.picked, f.leftOut]), [['Lives in Utrecht', 2, 0, 0], ['Works as a nurse', 1, 0, 0]]);
@@ -52,6 +52,7 @@ test('news-only: every matching story once per event, judged once, a pick become
     const three = await ok(pod, 'stories.forProfile', { peek: true, limit: 1, after: two.nextCursor });
     assert.deepEqual([...ids(one), ...ids(two), ...ids(three)], ['h1', 'h4', 'h3']);
     assert.equal(three.nextCursor, undefined);
+    assert.deepEqual([one, two, three].map((p) => p.summary.publishers), [4, 4, 4], 'every report of the run counts, from the first page');
     assert.equal((await call(pod, 'stories.forProfile', { after: 'feedbeef.0' })).error?.code, 'run_expired');
 
     assert.equal((await call(pod, 'stories.judge', [{ id: 'h1', verdict: 'picked', reason: 'Rents in Utrecht are rising.' }])).error?.code, 'bad_input', 'a pick needs a level');
@@ -118,6 +119,63 @@ test('with an AI service too, a peek never records a story as shown', async () =
     // The pod's own reading may judge a story in between; one still unjudged is not returned again.
     const second = await ok(pod, 'stories.forProfile');
     assert.deepEqual(second.stories.filter((s: any) => !s.verdict && unjudged.includes(s.id)), []);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('without peek, a story an earlier page of the same run returned is not counted as shown before', async () => {
+  const w = await world({ articles: ARTICLES, topics: TOPICS, config: { ai: undefined } });
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await profile(pod);
+    const one = await ok(pod, 'stories.forProfile', { limit: 1 });
+    const two = await ok(pod, 'stories.forProfile', { limit: 1, after: one.nextCursor });
+    const three = await ok(pod, 'stories.forProfile', { limit: 1, after: two.nextCursor });
+    assert.deepEqual([...ids(one), ...ids(two), ...ids(three)], ['h1', 'h4', 'h3']);
+    assert.deepEqual([one.shownBefore, two.shownBefore, three.shownBefore], [0, 0, 0]);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('with an AI service: a story the assistant left out is never a pick once the pod scores it, and what the pod scored counts as judged', async () => {
+  const articles = [...ARTICLES, { _id: 'h5', title: 'Nurses union calls second strike day' }];
+  const w = await world({ articles, topics: { ...TOPICS, 'nurse strikes': ['h4', 'h5'] } });
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('holdReads', true);
+    await profile(pod);
+    assert.deepEqual((await ok(pod, 'stories.forProfile', { peek: true })).stories.map((s: any) => s.verdict ?? null), [null, null, null, null]);
+    assert.deepEqual((await ok(pod, 'stories.judge', [{ id: 'h4', verdict: 'left_out', reason: 'A hospital you do not work at.' }])).saved, [{ id: 'h4', verdict: 'left_out' }]);
+
+    // The pod's own reading then scores every story: it would pick h1 and h4, rejects h3, and h5 was read on a phone.
+    await pod.ask('plant', [
+      { id: 'h1', relevance: 0.9 },
+      { id: 'h4', relevance: 0.95, reason: 'Nurses like you are walking out.' },
+      { id: 'h3', relevance: 0.1, reason: '' },
+      { id: 'h5', status: 'already_read' },
+    ]);
+    const picks = await ok(pod, 'suggestions.get', { since: 'all', limit: 10, peek: true });
+    assert.deepEqual(picks.picks.map((p: any) => p.url.split('/').pop()), ['h1'], 'the story left out is no pick, so no notifier or phone gets it');
+    assert.equal(await pod.ask('rowStatus', 'h4'), 'excluded', 'and its row is one the scorer never moves');
+
+    const page = await ok(pod, 'stories.forProfile', { peek: true });
+    assert.deepEqual(
+      page.stories.map((s: any) => [s.id, s.verdict?.verdict ?? null, s.verdict?.by ?? null]),
+      [['h1', 'picked', 'pod'], ['h4', 'left_out', 'assistant'], ['h3', 'left_out', 'pod'], ['h5', 'left_out', 'pod']],
+    );
+    assert.deepEqual([page.summary.picked, page.summary.leftOut, page.summary.unjudged], [1, 3, 0]);
+    assert.equal(page.stories[3].verdict.reason, 'You have already read it.');
+    // Nothing is judged twice: the pod's own verdicts stand.
+    assert.deepEqual((await ok(pod, 'stories.judge', [{ id: 'h3', verdict: 'picked', level: 'high', reason: 'A new tram line opens near Overvecht.' }, { id: 'h5', verdict: 'picked', level: 'high', reason: 'Nurses union calls a strike.' }])).already, [
+      { id: 'h3', verdict: 'left_out' },
+      { id: 'h5', verdict: 'left_out' },
+    ]);
     await pod.ask('stop');
   } finally {
     await w.close();

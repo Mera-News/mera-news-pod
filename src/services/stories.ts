@@ -2,7 +2,8 @@
 // left out, with the reason, by the person's assistant or by the pod's own AI service. A verdict is
 // kept in verdicts.json, so a story is judged once. A pick the assistant makes is written as one of
 // the pod's own suggestions, so it reaches suggestions.get, the notifiers and a paired phone like any
-// other pick; a story left out lives only in verdicts.json and never shows as a pick.
+// other pick; a story left out is never a pick, whoever scores it later (see readFeed). A story the
+// pod's own AI service scored and did not pick counts as left out by the pod.
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -50,8 +51,12 @@ interface Run {
   topics: { text: string; matches: number }[];
   facts: { id: string; statement: string }[];
   complete: boolean;
-  publishers: Set<string>;
-  languages: Set<string>;
+  /** Every article of the run, read once, so the publishers and languages cover the whole run. */
+  articlesById?: Map<string, ArticleIn>;
+  publishers: number;
+  languages: number;
+  /** Stories this run returned unjudged: an earlier page, not an earlier run. */
+  marked: Set<string>;
 }
 interface Stored {
   verdict: Verdict;
@@ -94,7 +99,14 @@ function save(file: string, value: File) {
   fs.renameSync(tmp, file);
 }
 
-export function createStories(deps: { news: PodServices['news']; profile: Pick<PodServices['profile'], 'get'>; file: string; onChange(): void }): PodServices['stories'] {
+/** Why the pod's own reading did not pick a story, by the row's status. */
+const POD_LEFT_OUT: Record<string, string> = {
+  complete: 'Mera News judged it not close enough to your facts.',
+  excluded: 'Left out by your settings, such as a muted publisher.',
+  already_read: 'You have already read it.',
+};
+
+export function createStories(deps: { news: PodServices['news']; profile: Pick<PodServices['profile'], 'get'>; file: string; onChange(): void }): { stories: PodServices['stories']; leftOut(): Set<string> } {
   let data = load(deps.file);
   let chain: Promise<unknown> = Promise.resolve();
   const serially = <T>(fn: () => T | Promise<T>): Promise<T> => {
@@ -158,7 +170,11 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
     const { facts, topics } = await profileTopics();
     const signature = JSON.stringify([facts.map((f) => f.id), topics.map((t) => t.text)]);
     const last = [...runs.values()].at(-1);
-    if (last && last.signature === signature && Date.now() - last.at < REUSE_MS) return last;
+    if (last && last.signature === signature && Date.now() - last.at < REUSE_MS) {
+      // A new caller of the same run: what earlier pages returned now counts as shown before.
+      last.marked.clear();
+      return last;
+    }
 
     type Result = { topicText: string; articleIds: string[]; matchMeta?: { articleId: string; stableClusterId?: string | null }[] | null; hasNextPage?: boolean; nextCursor?: string | null };
     const ids = new Map<string, string[]>(topics.map((t) => [t.text.toLowerCase(), []]));
@@ -212,19 +228,24 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
       topics: lists.map(({ t, ids: list }) => ({ text: t.text, matches: list.length })),
       facts: facts.map((f) => ({ id: f.id, statement: f.statement })),
       complete,
-      publishers: new Set(),
-      languages: new Set(),
+      publishers: 0,
+      languages: 0,
+      marked: new Set(),
     };
     runs.set(run.id, run);
     for (const [id, r] of runs) if (runs.size > RUNS_KEPT || Date.now() - r.at > RUN_KEPT_MS) runs.delete(id);
     return run;
   }
 
-  /** What the pod itself holds as picks (its own AI service's, and the assistant's saved before), by article id. */
+  /** Every article id of a story the assistant left out. */
+  const leftOut = () => new Set(Object.values(data.stories).flatMap((v) => (v.verdict === 'left_out' ? v.ids : [])));
+
+  /** The pod's own verdicts by article id: its picks (its AI service's, and the assistant's saved before), and what its scoring finished without picking. */
   async function podPicks(): Promise<Map<string, StoryVerdict>> {
-    const { candidates } = await readFeed();
+    const { candidates, rows } = await readFeed(leftOut());
     const out = new Map<string, StoryVerdict>();
     for (const c of candidates) for (const id of c.memberIds) out.set(id, { verdict: 'picked', reason: c.pick.reason, level: c.pick.level, by: 'pod' });
+    for (const r of rows) if (!out.has(r.articleId) && POD_LEFT_OUT[r.status]) out.set(r.articleId, { verdict: 'left_out', reason: POD_LEFT_OUT[r.status], by: 'pod' });
     return out;
   }
 
@@ -266,8 +287,8 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
       picked,
       leftOut,
       unjudged: run.stories.length - picked - leftOut,
-      publishers: run.publishers.size,
-      languages: run.languages.size,
+      publishers: run.publishers,
+      languages: run.languages,
       complete: run.complete,
     };
   }
@@ -279,6 +300,16 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
       for (const a of got.articlesForTopicsByIds.articles ?? []) out.set(a._id, a);
     }
     return out;
+  }
+
+  /** Reads every article of the run once, and counts its publishers and languages. */
+  async function hydrateRun(run: Run): Promise<Map<string, ArticleIn>> {
+    if (run.articlesById) return run.articlesById;
+    const all = await hydrate([...run.byArticle.keys()]);
+    run.publishers = new Set([...all.values()].flatMap((a) => (a.publication_name ? [text(a.publication_name, 200)] : []))).size;
+    run.languages = new Set([...all.values()].map((a) => text(a.language_code, 12) || 'und')).size;
+    run.articlesById = all;
+    return all;
   }
 
   // Only the named fields leave, never a description or any other article text. Text from a feed is capped.
@@ -323,6 +354,7 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
         run = await startRun();
       }
       const picks = await podPicks();
+      await hydrateRun(run);
       if (limit === 0) return { run: run.id, summary: summarise(run, picks), stories: [], shownBefore: 0 };
 
       return serially(async () => {
@@ -330,11 +362,12 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
         const now = Date.now();
         // Without peek, unjudged stories an earlier run returned wait out their 72 hours.
         const skip = (s: Story) => !options.peek && !verdictOf(s, picks) && data.shown[s.key] !== undefined;
-        const shownBefore = options.peek ? 0 : run.stories.filter(skip).length;
+        // Stories an earlier page of this run returned are skipped too, but were not held back.
+        const shownBefore = options.peek ? 0 : run.stories.filter((s) => skip(s) && !run.marked.has(s.key)).length;
         const chosen: { at: number; s: Story }[] = [];
         let i = start;
         for (; i < run.stories.length && chosen.length < limit; i++) if (!skip(run.stories[i])) chosen.push({ at: i, s: run.stories[i] });
-        const articles = await hydrate(chosen.map((c) => c.s.ids[0]));
+        const articles = await hydrateRun(run);
         let page = chosen.flatMap((c) => {
           const a = articles.get(c.s.ids[0]);
           const out = a && storyOut(run, c.s, a, verdictOf(c.s, picks));
@@ -346,16 +379,15 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
         const end = page.length < chosen.length && page.length > 0 ? page[page.length - 1].at + 1 : i;
         let more = false;
         for (let j = end; j < run.stories.length && !more; j++) more = !skip(run.stories[j]);
-        for (const p of page) {
-          if (p.out.publisher) run.publishers.add(p.out.publisher);
-          run.languages.add(p.out.language);
-        }
         if (!options.peek) {
           const fresh = page.filter((p) => !p.out.verdict);
-          for (const p of fresh) data.shown[p.s.key] = now;
+          for (const p of fresh) {
+            data.shown[p.s.key] = now;
+            run.marked.add(p.s.key);
+          }
           if (fresh.length) write();
         }
-        return { run: run.id, summary: { ...summary, publishers: run.publishers.size, languages: run.languages.size }, stories: page.map((p) => p.out), ...(more ? { nextCursor: `${run.id}.${end}` } : {}), shownBefore };
+        return { run: run.id, summary, stories: page.map((p) => p.out), ...(more ? { nextCursor: `${run.id}.${end}` } : {}), shownBefore };
       });
     },
 
@@ -422,6 +454,12 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
               result.refused.push({ id: item.id, code: 'unknown_story', message: 'Mera News has no article with this id now, so nothing was saved.' });
               continue;
             }
+            // The client never rescores a row the person muted or already read, so such a pick cannot be saved.
+            const was = (await database.get('article_suggestions').find(item.id)).status;
+            if (was === 'excluded' || was === 'already_read') {
+              result.refused.push({ id: item.id, code: 'not_available', message: 'The person muted this publisher or already read this story, so it cannot be picked. Do not try again.' });
+              continue;
+            }
             await saveScoringResult(item.id, { relevance: score(item.level!), reason: item.reason, reasonSkipped: false });
             const row = await database.get('article_suggestions').find(item.id);
             // The client keeps a reason only when it shares a word with the article; without one the row is no pick.
@@ -446,5 +484,5 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
       });
     },
   };
-  return stories;
+  return { stories, leftOut };
 }

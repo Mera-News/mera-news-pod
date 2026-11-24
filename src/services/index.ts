@@ -42,11 +42,15 @@ export function createServices(context: ServicesContext): { services: PodService
   const running = !!notifier || appNotify;
   // Asked once, in the background: a plugin that needs it waits for the answer.
   const dataServer = fetchLimits(cfg);
+  const profile = createProfile(() => dataServer, !!cfg.ai);
+  const news = createNewsService(cfg);
+  // Before the first read of the Feed: a story the assistant left out is never a pick.
+  const stories = createStories({ news, profile, file: cfg.paths.verdictsFile, onChange: changes.poke });
 
   /** Reads the Feed and numbers its new stories, inside the ledger's one chain. */
   const feed = () =>
     ledger.run(async (tx) => {
-      const { candidates, liveIds } = await readFeed();
+      const { candidates, liveIds } = await readFeed(stories.leftOut());
       const seqs = tx.register(candidates.map((c) => c.memberIds), liveIds);
       return candidates.map((c, i) => ({ seq: seqs[i], pick: c.pick }));
     });
@@ -92,8 +96,6 @@ export function createServices(context: ServicesContext): { services: PodService
   // Served while reading is paused: it only reads what is already stored.
   const display = createDisplayService();
   const ai = createAiService(cfg.paths);
-  const profile = createProfile(() => dataServer, !!cfg.ai);
-  const news = createNewsService(cfg);
   const services: PodServices = {
     aiService: ai.service,
     commands: createCommands(log, display),
@@ -102,7 +104,7 @@ export function createServices(context: ServicesContext): { services: PodService
     model: createModelService(cfg),
     news,
     // Served while reading is paused, like the news: the assistant or the person asks for it.
-    stories: createStories({ news, profile, file: cfg.paths.verdictsFile, onChange: changes.poke }),
+    stories: stories.stories,
     display,
     events: changes.events,
 
@@ -112,7 +114,7 @@ export function createServices(context: ServicesContext): { services: PodService
         const [snapshot, reply] = await Promise.all([
           takeSnapshot(snapshotInputs),
           ledger.run(async (tx) => {
-            const { candidates, liveIds } = await readFeed();
+            const { candidates, liveIds } = await readFeed(stories.leftOut());
             const seqs = tx.register(candidates.map((c) => c.memberIds), liveIds);
             const fitsPage = fits ? (page: { pick: PickView }[]) => fits(page.map((i) => i.pick)) : undefined;
             const taken = tx.take(candidates.map((c, i) => ({ seq: seqs[i], pick: c.pick })), since, limit, fitsPage, peek === true);

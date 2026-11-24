@@ -159,7 +159,7 @@ export interface StoriesSummary {
   picked: number;
   leftOut: number;
   unjudged: number;
-  /** Publishers and languages of the stories this run has returned so far: the last page carries every one. */
+  /** Publishers and languages of every article in the run. */
   publishers: number;
   languages: number;
   /** False when the news server had more pages of matches than one run reads. */
@@ -181,7 +181,7 @@ export interface JudgeResult {
   saved: { id: string; verdict: Verdict }[];
   /** Stories judged before: the first verdict stands. */
   already: { id: string; verdict: Verdict }[];
-  /** Not saved: `unknown_story` (no such article) or `reason_not_grounded` (a pick's reason shares no word with its headline). */
+  /** Not saved: `unknown_story` (no such article), `reason_not_grounded` (a pick's reason shares no word with its headline; write it again) or `not_available` (muted or already read; never picked). */
   refused: { id: string; code: string; message: string }[];
 }
 

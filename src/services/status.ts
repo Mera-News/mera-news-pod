@@ -75,8 +75,11 @@ export interface Snapshot {
   picksSetAside?: string;
 }
 
+// Addressed to the person's own assistant, which does the picking when no AI service is set.
 export const NO_AI_FIX =
-  'No AI service is set, so the pod makes no picks. News search and the latest news still work. To get picks, set ai.baseUrl and ai.model in pod.json and restart the pod.';
+  'This pod does not rate the news on its own. Pick for the person yourself: call news_for_profile, or get_profile and then search_news for their topics, and say in one sentence why each story matters to them. No AI service or setup is needed.';
+const NO_AI_NO_FACTS =
+  'Nothing is saved yet. Offer to set up their news profile, one question at a time: where they live first, then their work, then the news they care about. Each question can be skipped. Read each fact back and ask before saving it.';
 
 export interface SnapshotInputs {
   noAi?: boolean;
@@ -112,23 +115,22 @@ export async function takeSnapshot(inputs: SnapshotInputs): Promise<Snapshot> {
 }
 
 export function problemsOf(s: Snapshot): PodProblem[] {
-  // Nothing else can be said when no AI service is set: no read runs, so the rest would only mislead.
-  if (s.noAi) return [{ code: 'no_ai_service', who: 'person', fix: NO_AI_FIX }];
+  const dataKeyRefused: PodProblem = {
+    code: 'data_key_refused',
+    who: 'person',
+    fix: 'The data server refuses the pod\'s key, so no news can be fetched. Set dataApiKey in secrets.json (or MERA_POD_DATA_API_KEY) to the key the data server expects, then restart the pod.',
+  };
+  // With no AI service no read runs, so only what the news tools need is said.
+  if (s.noAi) return [{ code: 'no_ai_service', who: 'assistant', fix: NO_AI_FIX }, ...(s.dataKeyRefused ? [dataKeyRefused] : [])];
   const problems: PodProblem[] = [];
   if (s.aiKeyRefused) {
     problems.push({
       code: 'ai_key_refused',
       who: 'person',
-      fix: 'The AI service refuses the pod\'s key, so nothing can be rated. Set aiApiKey in secrets.json (or MERA_POD_AI_API_KEY), then restart the pod.',
+      fix: 'The AI service refuses the pod\'s key, so nothing can be rated. Set aiApiKey in secrets.json (or MERA_POD_AI_API_KEY), then restart the pod. Or remove the ai block from pod.json and let your assistant pick.',
     });
   }
-  if (s.dataKeyRefused) {
-    problems.push({
-      code: 'data_key_refused',
-      who: 'person',
-      fix: 'The data server refuses the pod\'s key, so no news can be fetched. Set dataApiKey in secrets.json (or MERA_POD_DATA_API_KEY) to the key the data server expects, then restart the pod.',
-    });
-  }
+  if (s.dataKeyRefused) problems.push(dataKeyRefused);
   if (s.readFailing) {
     problems.push({
       code: 'read_failing',
@@ -164,7 +166,8 @@ export function when(nextReadAt: string | null, now = Date.now()): string {
 export const nextReadAtOf = (s: Snapshot, paused: boolean): string | null =>
   paused || s.lastRunMs === null ? null : new Date(s.lastRunMs + s.frequencyMs).toISOString();
 
-const BLOCKING = ['no_ai_service', 'ai_key_refused', 'data_key_refused', 'read_failing', 'no_topics'];
+// no_ai_service is not blocking: the person's assistant picks instead.
+const BLOCKING = ['ai_key_refused', 'data_key_refused', 'read_failing', 'no_topics'];
 
 /** `returned`: how many picks the reply carries. A reply with picks is never `first_read_pending`; a problem or a pause still says so. */
 export function judge(s: Snapshot, paused: boolean, returned = 0, now = Date.now()): { state: SuggestionsState; hint: string; nextReadAt: string | null } {
@@ -175,10 +178,14 @@ export function judge(s: Snapshot, paused: boolean, returned = 0, now = Date.now
   let hint: string;
   if (blocking) {
     state = 'problem';
-    hint = `${blocking.fix} ${blocking.who === 'person' ? `Mera tries again ${when(nextReadAt, now)}.` : ''}`.trim();
+    hint = `${blocking.fix} ${blocking.who === 'person' && !s.noAi ? `Mera tries again ${when(nextReadAt, now)}.` : ''}`.trim();
   } else if (s.facts === 0) {
     state = 'no_facts';
-    hint = 'Nothing is saved about what you want to read yet, so there is nothing to look for. Add a fact about yourself or an interest, then check again in a few minutes.';
+    hint = s.noAi ? NO_AI_NO_FACTS : 'Nothing is saved about what you want to read yet, so there is nothing to look for. Add a fact about yourself or an interest, then check again in a few minutes.';
+  } else if (s.noAi) {
+    // Nothing reads here, so neither topics nor a first read are waited for.
+    state = 'ok';
+    hint = NO_AI_FIX;
   } else if (s.topics === 0 && s.topicsPending > 0) {
     state = 'topics_pending';
     hint = 'Topics are still being made from your saved facts. Check again in a few minutes.';

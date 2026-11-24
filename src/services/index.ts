@@ -91,7 +91,7 @@ export function createServices(context: ServicesContext): { services: PodService
   const display = createDisplayService();
   const services: PodServices = {
     commands: createCommands(log, display),
-    profile: createProfile(() => dataServer),
+    profile: createProfile(() => dataServer, !!cfg.ai),
     // Chat is the person's own action, so it is served while reading is paused.
     model: createModelService(cfg),
     news: createNewsService(cfg),

@@ -126,6 +126,6 @@ It looks like `https://pod.example.com/mcp/<token>`. Anyone who holds that addre
 
 ## What the assistant can do
 
-`get_profile`, `add_facts`, `remove_facts`, `edit_topics`, `get_suggestions`, `search_news`, `latest_news`, `get_status` and `set_reading`. `search_news` and `latest_news` read the stored news directly, so they work without an AI service and without waiting for picks. There are also two prompts: `set_up_profile`, which interviews you and saves the answers as facts, and `daily_digest`, which shows new picks by level.
+`get_profile`, `add_facts`, `remove_facts`, `edit_topics`, `get_suggestions`, `search_news`, `latest_news`, `get_status` and `set_reading`. `search_news` and `latest_news` read the stored news directly, so they work without an AI service and without waiting for picks. Without an AI service the pod makes no picks of its own: ask your assistant for the news, and it picks from your profile with these tools. There are also two prompts: `set_up_profile`, which interviews you and saves the answers as facts, and `daily_digest`, which shows new picks by level.
 
 A pick is a headline, a link out and a one-line reason. The pod never returns a summary or the article text. The server asks your AI app to send you to the publisher's site to read each article, and never to fetch, copy or summarise it there, since that may breach the publisher's copyright.

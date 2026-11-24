@@ -4,7 +4,7 @@ Mera News on your own machine. The pod keeps your news profile (the facts you gi
 
 You reach the pod through plugins: an MCP server for your AI tools, a local page, or one you write yourself.
 
-The pod gets its news from a Mera News data server you run, and uses any AI service with an OpenAI-compatible API, including one on your own machine. Your profile stays on the machine that runs the pod. The AI service you choose sees your profile and the articles it scores.
+The pod gets its news from a Mera News data server. For picks made while you are away it uses any AI service with an OpenAI-compatible API, including one on your own machine. Without one, your assistant picks the news for you when you ask. Your profile stays on the machine that runs the pod. An AI service you choose sees your profile and the articles it scores.
 
 This project is in development.
 

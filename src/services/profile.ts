@@ -2,8 +2,9 @@
 // Every write goes through the client's own functions, so a fact added here is treated exactly like
 // one added in the app: its topics are generated, and a removed topic is never generated back.
 import type { DataServerInfo } from './status';
-import type { AddFactsResult, FactView, PodServices, RemoveFactsResult, TopicEditResult, TopicSource, TopicView, TopicsStatus } from '../plugin-api';
+import type { AddFactsResult, AddTopicsResult, FactView, PodServices, RemoveFactsResult, TopicEditResult, TopicSource, TopicView, TopicsStatus } from '../plugin-api';
 import { client } from './client';
+import { PodError } from './ledger';
 
 type Fact = { id: string; statement: string; topicsStatus: string | null; createdAt: string; questionnaireAttribute?: string };
 type TopicRow = { id: string; text: string; weight: number; status: string; provenance: string; pendingDeleteAt: number | null };
@@ -13,13 +14,26 @@ const topics = () => client<{ getByFact(factId: string): Promise<TopicRow[]>; se
 
 export const PAGE = 50;
 export const MAX_STATEMENT = 300;
+export const MAX_TOPICS = 12;
+export const MAX_TOPIC = 80;
 const CONFLICT_NEXT = 'remove the fact it conflicts with first, or reword this one';
 
 const SOURCES: Record<string, TopicSource> = { llm: 'generated', migration: 'generated', exploration: 'generated', combo: 'generated', user: 'added', feedback: 'added', tracked: 'followed' };
 const shown = (rows: TopicRow[]) => rows.filter((t) => t.pendingDeleteAt == null && t.status === 'active');
 
+/** Topic texts from outside the pod, checked and tidied: 1 to 12 of them, each 1 to 80 characters on one line. */
+export function cleanTopicTexts(texts: unknown): string[] {
+  const bad = () => new PodError('bad_topics', `Give 1 to ${MAX_TOPICS} topics, each 1 to ${MAX_TOPIC} characters of plain text. Nothing was saved.`, 'send fewer or shorter topics');
+  if (!Array.isArray(texts) || texts.length < 1 || texts.length > MAX_TOPICS) throw bad();
+  return texts.map((t) => {
+    const text = typeof t === 'string' ? t.replace(/\s+/g, ' ').trim() : '';
+    if (text.length < 1 || text.length > MAX_TOPIC || /\p{Cc}/u.test(text)) throw bad();
+    return text;
+  });
+}
 
-export function createProfile(server: () => Promise<DataServerInfo>): PodServices['profile'] {
+/** `hasAi`: the pod makes its own topics too, which a reply to `addTopics` says. */
+export function createProfile(server: () => Promise<DataServerInfo>, hasAi: boolean): PodServices['profile'] {
   const byCreated = (a: Fact, b: Fact) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
 
   return {
@@ -53,9 +67,14 @@ export function createProfile(server: () => Promise<DataServerInfo>): PodService
           saved: { id: string; statement: string; questionnaireAttribute: string | null }[],
         ): { newFactId: string; existingFactId: string; existingStatement: string }[];
       }>('news-harness/persona-management/fact-conflict');
-      const { commitFactChoices } = client<{ commitFactChoices(choices: { statement: string }[]): Promise<{ savedFacts: { id: string; statement: string }[] }> }>('chat-tools/fact-commit');
+      const { commitFactChoices } = client<{
+        commitFactChoices(choices: { statement: string; questionnaire?: { attribute: string }; skillId?: string }[]): Promise<{ savedFacts: { id: string; statement: string }[] }>;
+      }>('chat-tools/fact-commit');
       const { retryTopicGeneration } = client<{ retryTopicGeneration(id: string, statement: string): Promise<void> }>('chat-tools/tool-handlers');
       const { isHomeEntry } = client<{ isHomeEntry(entry: { statement: string }): boolean }>('mera-harness/core/fact-normalise');
+      const { CANONICAL_LOCATION_KEY } = client<{ CANONICAL_LOCATION_KEY: string }>('mera-harness/core/combined-fact');
+      // A home fact carries the app's residence attribute, which anchors where every later topic is set.
+      const homeAttribute = (statement: string) => (isHomeEntry({ statement }) ? CANONICAL_LOCATION_KEY : null);
 
       const saved = await facts().getFacts();
       const byStatement = new Map(saved.map((f) => [normalizeStatement(f.statement), f]));
@@ -77,7 +96,7 @@ export function createProfile(server: () => Promise<DataServerInfo>): PodService
           continue;
         }
         const conflict = detectFactConflicts(
-          [{ id: `new-${fresh.length}`, statement, questionnaireAttribute: null }],
+          [{ id: `new-${fresh.length}`, statement, questionnaireAttribute: homeAttribute(statement) }],
           saved.map((f) => ({ id: f.id, statement: f.statement, questionnaireAttribute: f.questionnaireAttribute ?? null })),
         )[0];
         if (conflict) {
@@ -87,12 +106,46 @@ export function createProfile(server: () => Promise<DataServerInfo>): PodService
 
       // One call, so topic generation for all of them is a single batch.
       if (fresh.length) {
-        const { savedFacts } = await commitFactChoices(fresh.map((statement) => ({ statement })));
+        const { savedFacts } = await commitFactChoices(
+          fresh.map((statement) => {
+            const attribute = homeAttribute(statement);
+            return attribute ? { statement, questionnaire: { attribute }, skillId: 'topics/residence' } : { statement };
+          }),
+        );
         result.added.push(...savedFacts.map((f) => ({ id: f.id, statement: f.statement })));
       }
       if (result.added.some((a) => isHomeEntry({ statement: a.statement })) && (await server().then((d) => d.limits.includes('place lookup') || d.placesNotLoaded))) {
         result.localCoverageWeaker = true;
       }
+      return result;
+    },
+
+    async addTopics(factId, texts) {
+      const wanted = cleanTopicTexts(texts);
+      const { normalizeTopicText } = client<{ normalizeTopicText(s: string): string }>('database/services/topic-service');
+      const { getAllDeclinedNormalizedTexts } = client<{ getAllDeclinedNormalizedTexts(): Promise<Set<string>> }>('database/services/topic-decline-service');
+      const { completeTopicGeneration } = client<{ completeTopicGeneration(factId: string, texts: string[]): Promise<{ id: string; text: string }[]> }>(
+        'database/services/topic-generation-status-service',
+      );
+      if (!(await facts().getFacts()).some((f) => f.id === factId)) throw new PodError('unknown_fact', 'No saved fact has this id. Nothing was saved.', 'call get_profile for the fact ids');
+
+      // A removed topic stays removed, and a topic the fact already has is not added twice.
+      const skip = await getAllDeclinedNormalizedTexts();
+      for (const t of await topics().getByFact(factId)) skip.add(normalizeTopicText(t.text));
+      const fresh: string[] = [];
+      const skipped: string[] = [];
+      for (const text of wanted) {
+        const key = normalizeTopicText(text);
+        if (skip.has(key)) skipped.push(text);
+        else {
+          skip.add(key);
+          fresh.push(text);
+        }
+      }
+      // Writes the topics as the pod's own generator does and marks the fact's topics done.
+      const minted = fresh.length ? await completeTopicGeneration(factId, fresh) : [];
+      const result: AddTopicsResult = { added: minted.map((t) => ({ id: t.id, text: t.text })), skipped };
+      if (hasAi) result.note = 'This pod also makes its own topics for each fact, so more may appear.';
       return result;
     },
 

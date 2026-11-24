@@ -44,6 +44,14 @@ export interface AddFactsResult {
   localCoverageWeaker?: boolean;
 }
 
+export interface AddTopicsResult {
+  added: { id: string; text: string }[];
+  /** Topics the person removed before, or the fact already has. */
+  skipped: string[];
+  /** Set when the pod has an AI service and makes its own topics as well. */
+  note?: string;
+}
+
 export interface RemoveFactsResult {
   removed: { id: string; statement: string; topics: string[] }[];
   notFound: string[];
@@ -154,6 +162,12 @@ export interface PodServices {
     addFacts(statements: string[]): Promise<AddFactsResult>;
     removeFacts(ids: string[]): Promise<RemoveFactsResult>;
     editTopics(edit: TopicEdit): Promise<TopicEditResult>;
+    /**
+     * Contract version 2 and later. Saves topics written outside the pod for one fact, at most 12,
+     * each 1 to 80 characters, and marks the fact's topics done. Topics the person removed before and
+     * ones the fact already has are skipped. An unknown fact id fails with code `unknown_fact`.
+     */
+    addTopics(factId: string, texts: string[]): Promise<AddTopicsResult>;
   };
   suggestions: {
     /**

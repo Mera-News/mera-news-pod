@@ -2,7 +2,7 @@
 
 The pod keeps your news profile on your machine, reads the news on a schedule and keeps the stories that matter to you, each with a one-line reason. You reach it through a plugin, see [clients](clients.md).
 
-It needs Node 22.13 or newer (Node 24 also runs the one-computer news store), a Mera News data server, and, for picks, an AI service with an OpenAI-compatible API. The AI service can run on your own machine.
+It needs Node 22.13 or newer (Node 24 also runs the one-computer news store), a Mera News data server, and, for picks made while you are away, an AI service with an OpenAI-compatible API. The AI service can run on your own machine. Without one, your assistant picks the news for you when you ask.
 
 ## Choose where the news comes from
 
@@ -10,7 +10,7 @@ It needs Node 22.13 or newer (Node 24 also runs the one-computer news store), a 
 - **On this computer**: the data server's [one-computer setup](https://github.com/Mera-News/mera-news-data-server/blob/main/docs/self-host.md#the-one-computer-setup), one SQLite file with no account, no Docker and no key. It is meant for 10 to 20 feeds. Run `mera-news-local serve`, set `dataServer.url` to `http://127.0.0.1:3002` in `pod.json` below, and leave `dataApiKey` unset.
 - **The server setup**, for more feeds than that: follow [the data server guide](https://github.com/Mera-News/mera-news-data-server/blob/main/docs/self-host.md) through its step 21. The pod needs its search, which the server setup offers only with a key: `NEWS_API_OPEN=false` and `MERA_NEWS_API_KEY` in the data server's `.env`, then the same key as `dataApiKey` in the pod's `secrets.json` and the data server's address as `dataServer.url` in its `pod.json`. Its open mode, without a key, is for trying the data server alone.
 
-Picks need an AI service, and they cover articles published in the last 48 hours. Without an AI service, leave `ai` out of `pod.json`: the pod then makes no picks, but the MCP tools `search_news` and `latest_news` still read the stored news, and `get_status` says `no_ai_service`.
+Picks the pod makes on its own, while you are away, need an AI service, and they cover articles published in the last 48 hours. Without an AI service, leave `ai` out of `pod.json`: the pod then makes no picks of its own, and when you ask, your assistant picks for you from your profile with the MCP tools `search_news` and `latest_news`. `get_status` says `no_ai_service` and tells the assistant to do that. No AI key is needed for it.
 
 ## Install
 
@@ -47,7 +47,7 @@ Edit `pod.json`:
 | Key | Meaning |
 |---|---|
 | `dataServer.url` | The data server. `/graphql` is added when missing. |
-| `ai.baseUrl`, `ai.model` | The AI service and the model it should use. Both are needed for picks; leave the whole `ai` block out to serve news only. |
+| `ai.baseUrl`, `ai.model` | The AI service and the model it should use. Both are needed for picks made while you are away; leave the whole `ai` block out and your assistant picks when you ask. |
 | `ai.concurrency` | Requests in flight at once, 1 to 16. Default 2. |
 | `ai.callTimeoutSeconds` | How long one request may take, 10 to 3600. Default 300. |
 | `reading.everyMinutes` | How often the pod reads, 5 to 1440. Default 15. |
@@ -79,7 +79,7 @@ The pod also says what is wrong while it runs. Ask your assistant for the status
 
 | Problem | What to do |
 |---|---|
-| `ai_key_refused` | The AI service refuses the key. Set `aiApiKey`, restart. |
+| `ai_key_refused` | The AI service refuses the key. Set `aiApiKey` and restart, or remove the `ai` block and let your assistant pick. |
 | `data_key_refused` | The data server refuses the key. Set `dataApiKey`, restart. |
 | `read_failing` | The last read failed. Check that both servers run, then run `check`. |
 | `picks_history_reset` | The pick list could not be read. It was moved to `data/picks.json.unreadable` and some picks may arrive a second time. |

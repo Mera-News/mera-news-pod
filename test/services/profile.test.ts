@@ -276,3 +276,51 @@ test('a fact whose topics are ready starts a read at once, once, and not while r
     await w.close();
   }
 });
+
+test('a home fact is saved with the residence attribute, and another fact without it', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await ok(pod, 'profile.addFacts', ['Lives in Utrecht', 'Follows chess']);
+    const rows: { statement: string; questionnaireAttribute?: string }[] = await pod.ask('factRows');
+    const attribute = (statement: string) => rows.find((r) => r.statement === statement)?.questionnaireAttribute;
+    assert.equal(attribute('Lives in Utrecht'), 'location: neighborhood/area, city, and country (preserve specifics)');
+    assert.equal(attribute('Follows chess'), undefined);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('topics written for a fact are saved and mark it done; removed and repeated ones are skipped; bad input saves nothing', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    const fact = await pod.ask('plantFact', { statement: 'Follows sailing', status: 'pending', topics: [{ text: 'sailing' }, { text: 'regattas' }] });
+    await ok(pod, 'profile.editTopics', { remove: [fact.topicIds[1]] });
+
+    const reply = await ok(pod, 'profile.addTopics', fact.id, ['  Ocean   racing ', 'SAILING', 'regattas', 'ocean racing', 'America\'s Cup']);
+    assert.deepEqual(reply.added.map((t: any) => t.text), ['Ocean racing', "America's Cup"]);
+    assert.deepEqual(reply.skipped, ['SAILING', 'regattas', 'ocean racing']);
+    assert.match(reply.note, /also makes its own topics/, 'a pod with an AI service says so');
+    const view = (await profile(pod)).facts[0];
+    assert.equal(view.topicsStatus, 'done');
+    assert.deepEqual(view.topics.map((t: any) => t.text).sort(), ["America's Cup", 'Ocean racing', 'sailing']);
+
+    for (const [id, texts, code] of [
+      [fact.id, Array.from({ length: 13 }, (_, i) => `topic ${i}`), 'bad_topics'],
+      [fact.id, ['x'.repeat(81)], 'bad_topics'],
+      [fact.id, [], 'bad_topics'],
+      ['no-such-fact', ['chess'], 'unknown_fact'],
+    ] as const) {
+      const bad = await call(pod, 'profile.addTopics', id, texts);
+      assert.equal(bad.error?.code, code);
+    }
+    assert.equal((await profile(pod)).facts[0].topics.length, 3, 'nothing more was saved');
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});

@@ -13,7 +13,7 @@ const STOP_TIMEOUT_MS = 5_000;
 const unavailable = () => Promise.reject(new Error('the pod is not running, so this is not available'));
 /** What a plugin gets when it is only being described, not run. */
 export const unavailableServices: PodServices = {
-  profile: { get: unavailable, addFacts: unavailable, removeFacts: unavailable, editTopics: unavailable },
+  profile: { get: unavailable, addFacts: unavailable, removeFacts: unavailable, editTopics: unavailable, addTopics: unavailable },
   suggestions: { get: unavailable },
   reading: { status: unavailable, set: unavailable, readNow: unavailable },
   commands: { run: unavailable },

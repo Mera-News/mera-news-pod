@@ -43,7 +43,7 @@ The types are in `mera-news-pod/plugin-api`. Import types only: a plugin never i
 
 | Service | What it does |
 |---|---|
-| `profile` | `get({ offset })` pages through the saved facts and their topics. `addFacts`, `removeFacts` and `editTopics` change them. |
+| `profile` | `get({ offset })` pages through the saved facts and their topics. `addFacts`, `removeFacts` and `editTopics` change them. `addTopics(factId, texts)` saves up to 12 topics you wrote for one fact and marks its topics done. |
 | `suggestions` | `get({ since, limit, peek })` returns picks, oldest first, with a `cursor` for the next page. See [reading picks](#reading-picks-without-taking-them). |
 | `reading` | `status()` is the pod's state: when it reads, what it found, and any problem with a fix. `set({ paused })` pauses or resumes reading; `readNow()` starts a read. |
 | `model` | `chatCompletions(body, signal)` sends an OpenAI-style chat request to the pod's AI service. |
@@ -51,7 +51,7 @@ The types are in `mera-news-pod/plugin-api`. Import types only: a plugin never i
 | `display`, `commands` | The tables the Mera News app shows, and the named changes it makes. The sync plugin uses them; pairing the app with a pod is not available yet. |
 | `events` | `on('changed', listener)` after a change to what the app's tables hold (the profile and the picks among them) or to the pick history, at most every two seconds. `on('notify', listener)` with each new `emergency` and `high` pick. Both return a function that stops listening. |
 
-`display`, `commands`, `events` and `reading.readNow` are in version 2 only. A pod error carries a `code`, a `message` and a `next` step you can show as they are.
+`display`, `commands`, `events`, `reading.readNow` and `profile.addTopics` are in version 2 only. A pod error carries a `code`, a `message` and a `next` step you can show as they are.
 
 ## Reading picks without taking them
 

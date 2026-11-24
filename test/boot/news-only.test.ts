@@ -28,7 +28,7 @@ async function newsOnlyWorld() {
   };
 }
 
-test('news-only: the pod starts with no ai, sends nothing to any AI origin, and status names no_ai_service', async () => {
+test('news-only: the pod starts with no ai, sends nothing to any AI origin, and the assistant is told to pick', async () => {
   const w = await newsOnlyWorld();
   try {
     const pod = startServicesPod(w.home);
@@ -36,16 +36,15 @@ test('news-only: the pod starts with no ai, sends nothing to any AI origin, and 
 
     const status = await ok(pod, 'reading.status');
     assert.deepEqual(status.problems.map((p: { code: string }) => p.code), ['no_ai_service']);
-    assert.equal(status.problems[0].who, 'person');
-    assert.match(status.problems[0].fix, /^No AI service is set, so the pod makes no picks\. News search and the latest news still work\. To get picks, set ai\.baseUrl and ai\.model in pod\.json and restart the pod\.$/);
+    assert.equal(status.problems[0].who, 'assistant', 'the person\'s own assistant picks instead');
+    assert.match(status.problems[0].fix, /^This pod does not rate the news on its own\. Pick for the person yourself/);
     assert.equal(status.ai, null);
     assert.equal(status.reading, 'paused', 'nothing can read without an AI service');
     assert.equal(status.nextReadAt, null);
 
-    const suggestions = await ok(pod, 'suggestions.get', { limit: 10 });
-    assert.equal(suggestions.state, 'problem');
-    assert.deepEqual(suggestions.picks, []);
-    assert.match(suggestions.hint, /^No AI service is set/);
+    const empty = await ok(pod, 'suggestions.get', { limit: 10 });
+    assert.equal(empty.state, 'no_facts');
+    assert.match(empty.hint, /^Nothing is saved yet\. Offer to set up their news profile/);
 
     const news = await ok(pod, 'news.graphql', { operationName: 'NewsServerStatus', query: 'query NewsServerStatus { newsServerStatus { placesSeeded } }' });
     assert.ok(news.data || news.errors, 'the data server answered');
@@ -57,6 +56,17 @@ test('news-only: the pod starts with no ai, sends nothing to any AI origin, and 
     assert.equal(facts.facts.length, 1);
     assert.equal(facts.facts[0].topicsStatus, 'pending', 'no topic job ran');
     assert.ok(pod.logs.filter((l) => l.includes('Geo derivation failed')).length <= 1);
+
+    // The assistant writes the topics itself, and the pod is then usable, not waiting on a read.
+    const topics = await ok(pod, 'profile.addTopics', added.added[0].id, ['sailing', 'regattas']);
+    assert.deepEqual(topics.added.map((t: { text: string }) => t.text), ['sailing', 'regattas']);
+    assert.equal(topics.note, undefined);
+    assert.equal((await ok(pod, 'profile.get')).facts[0].topicsStatus, 'done');
+    const suggestions = await ok(pod, 'suggestions.get', { limit: 10 });
+    assert.equal(suggestions.state, 'ok');
+    assert.deepEqual(suggestions.picks, []);
+    assert.match(suggestions.hint, /^This pod does not rate the news on its own/);
+    assert.doesNotMatch(suggestions.hint, /pod\.json|key/i);
 
     assert.equal(await pod.ask('trigger'), 'paused', 'a read is held');
     const chat = await call(pod, 'model.chatCompletions', { messages: [{ role: 'user', content: 'hi' }] });

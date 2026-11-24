@@ -121,7 +121,7 @@ async function hosted(files: Record<string, string>, meraNewsApp: string | null 
   });
   const subs = { on: 0, off: 0, listeners: new Set<() => void>() };
   const services = {
-    profile: { get: fn, addFacts: fn, removeFacts: fn, editTopics: fn },
+    profile: { get: fn, addFacts: fn, removeFacts: fn, editTopics: fn, addTopics: fn },
     suggestions: { get: fn },
     reading: { status: fn, set: fn, readNow: fn },
     model: { chatCompletions: fn },
@@ -160,7 +160,7 @@ test('a plugin speaking 1 gets exactly the members it had, one speaking 2 gets e
     news: ['graphql'],
   }]);
   assert.deepEqual(seen.two, [2, {
-    profile: ['addFacts', 'editTopics', 'get', 'removeFacts'],
+    profile: ['addFacts', 'addTopics', 'editTopics', 'get', 'removeFacts'],
     suggestions: ['get'],
     reading: ['readNow', 'set', 'status'],
     model: ['chatCompletions'],

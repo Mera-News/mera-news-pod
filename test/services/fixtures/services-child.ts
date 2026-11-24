@@ -146,6 +146,8 @@ async function main() {
           const topics = await createTopics((msg.arg.topics ?? []).map((t: { text: string; provenance?: string }) => ({ factId: fact.id, text: t.text, weight: 1, provenance: t.provenance ?? 'llm' })));
           return reply({ id: fact.id, topicIds: topics.map((t) => t.id) });
         }
+        case 'factRows': // the saved facts as the client stores them, with fields profile.get does not show
+          return reply(await client<{ getFacts(): Promise<unknown[]> }>('database/services/fact-service').getFacts());
         case 'holdReads': { // pauses or resumes the reading tasks without the pod's own pause, so a state can be read before any read clears it
           const { AppScheduler } = client<{ AppScheduler: { pauseTask(n: string): void; resumeTask(n: string): void } }>('scheduler/AppScheduler');
           for (const name of READING_TASKS) (msg.arg ? AppScheduler.pauseTask(name) : AppScheduler.resumeTask(name));

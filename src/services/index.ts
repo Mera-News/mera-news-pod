@@ -6,6 +6,7 @@ import { createNotifier, NOTIFY_LEVELS } from '../notify';
 import type { PickView, PodServices } from '../plugin-api';
 import { createDisplayService } from './display';
 import { createEvents } from './events';
+import { createAiService } from './ai-service';
 import { createCommands } from './commands';
 import { createLedger, PodError } from './ledger';
 import { readFeed } from './picks';
@@ -89,7 +90,9 @@ export function createServices(context: ServicesContext): { services: PodService
 
   // Served while reading is paused: it only reads what is already stored.
   const display = createDisplayService();
+  const ai = createAiService(cfg.paths);
   const services: PodServices = {
+    aiService: ai.service,
     commands: createCommands(log, display),
     profile: createProfile(() => dataServer, !!cfg.ai),
     // Chat is the person's own action, so it is served while reading is paused.
@@ -131,7 +134,8 @@ export function createServices(context: ServicesContext): { services: PodService
       },
       async status() {
         const [snapshot, picks, known, setup] = await Promise.all([takeSnapshot(snapshotInputs), feed(), dataServer, readSetup(!!cfg.ai)]);
-        return { ...buildStatus(cfg, control, snapshot, picks.length, known), ...(setup.complete ? {} : { setup }) };
+        const saved = ai.saved();
+        return { ...buildStatus(cfg, control, snapshot, picks.length, known), ...(saved ? { aiAfterRestart: saved } : {}), ...(setup.complete ? {} : { setup }) };
       },
       async set(change) {
         if (change.paused !== undefined) control.setPaused(change.paused);

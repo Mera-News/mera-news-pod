@@ -145,6 +145,8 @@ export interface PodStatus {
   limits: string[];
   /** Null when the pod has no AI service. */
   ai: { host: string; model: string } | null;
+  /** An AI service saved through `aiService.set` since this pod started: it runs from the next start. */
+  aiAfterRestart?: { host: string; model: string };
   dataServer: { host: string };
   /** Present only while setting up the profile is not finished. It never blocks reading or chat. */
   setup?: ProfileSetup;
@@ -213,6 +215,17 @@ export interface PodServices {
     set(change: { paused?: boolean; everyMinutes?: number }): Promise<PodStatus>;
     /** Contract version 2 and later. Starts a read: `ran`, `busy`, `debounced`, or `paused` while reading is paused. */
     readNow(): Promise<string>;
+  };
+  /** Contract version 2 and later. */
+  aiService: {
+    /**
+     * Saves the person's OpenAI-compatible AI service: `baseUrl` (https, or http on this computer) and
+     * `model` into pod.json, `apiKey` into secrets.json. Without `apiKey` the saved key is kept for the
+     * same origin and removed for a new one. It runs from the pod's next start, and `reading.status`
+     * names it as `aiAfterRestart` until then. The answer is only `{ set: true }`: the key is never
+     * returned. A bad value fails with code `bad_input` and changes nothing.
+     */
+    set(change: { baseUrl: string; model: string; apiKey?: string }): Promise<{ set: true }>;
   };
   /** Contract version 2 and later. */
   commands: {

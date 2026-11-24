@@ -127,6 +127,7 @@ async function hosted(files: Record<string, string>, meraNewsApp: string | null 
     model: { chatCompletions: fn },
     news: { graphql: fn },
     commands: { run: fn },
+    aiService: { set: fn },
     display: { snapshot: async () => ({}), versions: () => ({ schemaVersion: 0, registry: 0 }) },
     events: {
       on(_name: string, fn: () => void) {
@@ -166,6 +167,7 @@ test('a plugin speaking 1 gets exactly the members it had, one speaking 2 gets e
     model: ['chatCompletions'],
     news: ['graphql'],
     commands: ['run'],
+    aiService: ['set'],
     display: ['snapshot', 'versions'],
     events: ['on'],
   }]);

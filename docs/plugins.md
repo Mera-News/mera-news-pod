@@ -48,10 +48,11 @@ The types are in `mera-news-pod/plugin-api`. Import types only: a plugin never i
 | `reading` | `status()` is the pod's state: when it reads, what it found, and any problem with a fix. `set({ paused })` pauses or resumes reading; `readNow()` starts a read. |
 | `model` | `chatCompletions(body, signal)` sends an OpenAI-style chat request to the pod's AI service. |
 | `news` | `graphql(body)` asks the data server, for the news operations the pod allows. |
+| `aiService` | `set({ baseUrl, model, apiKey })` saves the person's OpenAI-compatible AI service: the address (https, or http on this computer) and model in `pod.json`, the key in `secrets.json`. Leave out `apiKey` to keep the saved key; it is kept only for the same origin. The answer is `{ set: true }` and never the key. The pod reads these at start, so the service runs after the pod restarts, and `reading.status()` names it as `aiAfterRestart` until then. |
 | `display`, `commands` | The tables the Mera News app shows, and the named changes it makes. The sync plugin uses them; pairing the app with a pod is not available yet. |
 | `events` | `on('changed', listener)` after a change to what the app's tables hold (the profile and the picks among them) or to the pick history, at most every two seconds. `on('notify', listener)` with each new `emergency` and `high` pick. Both return a function that stops listening. |
 
-`display`, `commands`, `events`, `reading.readNow` and `profile.addTopics` are in version 2 only. A pod error carries a `code`, a `message` and a `next` step you can show as they are.
+`aiService`, `display`, `commands`, `events`, `reading.readNow` and `profile.addTopics` are in version 2 only. A pod error carries a `code`, a `message` and a `next` step you can show as they are.
 
 ### Reviewing topics
 

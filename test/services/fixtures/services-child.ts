@@ -53,29 +53,29 @@ async function plantRows(rows: Row[]) {
   await database.write(async () => {
     const ops: unknown[] = [];
     for (const row of rows) {
-      ops.push(
-        col.prepareCreate((r: any) => {
-          r._raw.id = row.id;
-          r.articleId = row.id;
-          r.clusterMembershipsJson = row.cluster ? JSON.stringify([{ clusterId: row.cluster, confidence: 0.95, stableClusterId: row.cluster }]) : null;
-          r.relevance = row.relevance ?? 0.9;
-          r.reason = row.reason ?? `Why ${row.id} matters to you.`;
-          r.status = row.status ?? 'complete';
-          r.languageCode = row.lang ?? 'en';
-          r.publicationName = `Paper ${row.id}`;
-          // Made-up words per id, because the Feed shows headlines that share most words as one story.
-          // Ids that share a part (`old-a`, `old-b`) give such headlines.
-          r.titleEn = row.title ?? `Zxq${row.id} vorpal${row.id} glimmer${row.id}`;
-          r.titleOriginal = row.titleOriginal ?? row.title ?? `Zxq${row.id} vorpal${row.id} glimmer${row.id}`;
-          r.descriptionEn = `ARTICLE BODY ${row.id}`;
-          r.articleUrl = row.url ?? `https://example.com/${row.id}`;
-          r.matchedTopicTextsJson = '[]';
-          r.rawScore = row.relevance ?? 0.9;
-          r.scoredAt = Date.now();
-          r.createdAt = now;
-          r.firstPubDate = new Date(Date.now() - (row.publishedHoursAgo ?? 1) * 3_600_000);
-        }),
-      );
+      // A read already in flight may have stored the row first: the planted values replace it, so a test never depends on that timing.
+      const fill = (r: any) => {
+        r.articleId = row.id;
+        r.clusterMembershipsJson = row.cluster ? JSON.stringify([{ clusterId: row.cluster, confidence: 0.95, stableClusterId: row.cluster }]) : null;
+        r.relevance = row.relevance ?? 0.9;
+        r.reason = row.reason ?? `Why ${row.id} matters to you.`;
+        r.status = row.status ?? 'complete';
+        r.languageCode = row.lang ?? 'en';
+        r.publicationName = `Paper ${row.id}`;
+        // Made-up words per id, because the Feed shows headlines that share most words as one story.
+        // Ids that share a part (`old-a`, `old-b`) give such headlines.
+        r.titleEn = row.title ?? `Zxq${row.id} vorpal${row.id} glimmer${row.id}`;
+        r.titleOriginal = row.titleOriginal ?? row.title ?? `Zxq${row.id} vorpal${row.id} glimmer${row.id}`;
+        r.descriptionEn = `ARTICLE BODY ${row.id}`;
+        r.articleUrl = row.url ?? `https://example.com/${row.id}`;
+        r.matchedTopicTextsJson = '[]';
+        r.rawScore = row.relevance ?? 0.9;
+        r.scoredAt = Date.now();
+        r.createdAt = now;
+        r.firstPubDate = new Date(Date.now() - (row.publishedHoursAgo ?? 1) * 3_600_000);
+      };
+      const existing = await col.find(row.id).catch(() => null);
+      ops.push(existing ? existing.prepareUpdate(fill) : col.prepareCreate((r: any) => { r._raw.id = row.id; fill(r); }));
       for (const factId of row.factIds ?? []) {
         ops.push(links.prepareCreate((r: any) => { r.articleSuggestionId = row.id; r.factId = factId; r.createdAt = now; }));
       }
@@ -162,6 +162,8 @@ async function main() {
           for (const name of READING_TASKS) (msg.arg ? AppScheduler.pauseTask(name) : AppScheduler.resumeTask(name));
           return reply(null);
         }
+        case 'readsRunning': // true while a reading task started before holdReads is still running
+          return reply(READING_TASKS.some((name) => client<{ useSchedulerStore: { getState(): { isRunning(n: string): boolean } } }>('scheduler/scheduler-store').useSchedulerStore.getState().isRunning(name)));
         case 'lastRun': // makes the reading task look as if it finished a run just now
           client<{ useSchedulerStore: { getState(): { loadLastRunTimes(t: object): void } } }>('scheduler/scheduler-store').useSchedulerStore.getState().loadLastRunTimes({ 'feed-sync': msg.arg ?? Date.now() });
           return reply(null);

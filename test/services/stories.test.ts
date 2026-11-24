@@ -1,6 +1,6 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { call, killAll, ok, startServicesPod, world } from './helpers';
+import { call, killAll, ok, startServicesPod, world, until } from './helpers';
 
 after(killAll);
 
@@ -143,8 +143,9 @@ test('without peek, a story an earlier page of the same run returned is not coun
 });
 
 test('with an AI service: a story the assistant left out is never a pick once the pod scores it, and what the pod scored counts as judged', async () => {
-  const articles = [...ARTICLES, { _id: 'h5', title: 'Nurses union calls second strike day' }];
-  const w = await world({ articles, topics: { ...TOPICS, 'nurse strikes': ['h4', 'h5'] } });
+  // h5 shares no words or topic with h4, so no read can fold it into the story left out before it is planted as read.
+  const articles = [...ARTICLES, { _id: 'h5', title: 'Library extends weekend opening hours' }];
+  const w = await world({ articles, topics: { ...TOPICS, 'utrecht transport': ['h3', 'h5'] } });
   try {
     const pod = startServicesPod(w.home);
     assert.deepEqual(await pod.first, { ready: true });
@@ -153,14 +154,18 @@ test('with an AI service: a story the assistant left out is never a pick once th
     assert.deepEqual((await ok(pod, 'stories.forProfile', { peek: true })).stories.map((s: any) => s.verdict ?? null), [null, null, null, null]);
     assert.deepEqual((await ok(pod, 'stories.judge', [{ id: 'h4', verdict: 'left_out', reason: 'A hospital you do not work at.' }])).saved, [{ id: 'h4', verdict: 'left_out' }]);
 
+    // A read that began before holdReads can still be storing rows; plant only once it has finished.
+    await until(() => pod.ask('readsRunning'), (r) => r === false, 'reads in flight to finish');
     // The pod's own reading then scores every story: it would pick h1 and h4, rejects h3, and h5 was read on a phone.
     await pod.ask('plant', [
-      { id: 'h1', relevance: 0.9 },
-      { id: 'h4', relevance: 0.95, reason: 'Nurses like you are walking out.' },
-      { id: 'h3', relevance: 0.1, reason: '' },
-      { id: 'h5', status: 'already_read' },
+      // Real, distinct headlines: the made-up ones from the ids can read as one story and fold h5 into h4.
+      { id: 'h1', relevance: 0.9, title: 'Utrecht housing rents rise sharply' },
+      { id: 'h4', relevance: 0.95, reason: 'Nurses like you are walking out.', title: 'Hospital nurses walk out over pay' },
+      { id: 'h3', relevance: 0.1, reason: '', title: 'New tram line opens near Overvecht' },
+      { id: 'h5', status: 'already_read', title: 'Library extends weekend opening hours' },
     ]);
-    const picks = await ok(pod, 'suggestions.get', { since: 'all', limit: 10, peek: true });
+    // The pick ledger fills from a database watcher after the write, so wait for it rather than read once.
+    const picks = await until(() => ok(pod, 'suggestions.get', { since: 'all', limit: 10, peek: true }), (r: any) => r.picks.length > 0, 'the pod to number its pick');
     assert.deepEqual(picks.picks.map((p: any) => p.url.split('/').pop()), ['h1'], 'the story left out is no pick, so no notifier or phone gets it');
     assert.equal(await pod.ask('rowStatus', 'h4'), 'excluded', 'and its row is one the scorer never moves');
 

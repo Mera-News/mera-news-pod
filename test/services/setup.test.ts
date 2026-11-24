@@ -15,5 +15,5 @@ test('a topic made at the review time counts reviewed, one a moment later does n
 });
 
 test('setup leaves combination topics out: a fact with only those has no topics', () => {
-  assert.deepEqual(setupOf([fact({ reviewRequired: true })], () => [topic('combo', 0)]).noTopics, ['Follows chess']);
+  assert.deepEqual(setupOf([fact({ reviewRequired: true })], () => [topic('combo', 0)], true).noTopics, ['Follows chess']);
 });

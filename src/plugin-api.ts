@@ -43,11 +43,11 @@ export interface FactView {
  */
 export interface ProfileSetup {
   complete: boolean;
-  /** Topics are still being made. */
+  /** The pod's AI service is still making topics. */
   findingTopics: string[];
   /** Topics are ready and wait for the person to keep or remove them. */
   toReview: string[];
-  /** Topics failed or none were made: add topics or remove the fact. */
+  /** Topics failed, none were made, or the pod has no AI service to make them: add topics or remove the fact. */
   noTopics: string[];
 }
 

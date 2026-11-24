@@ -459,3 +459,22 @@ test('a fact needing review with no topics keeps setup open until it gets topics
     await w.close();
   }
 });
+
+test('in a pod with no AI service a fact saved without topics is not finding topics: it has none until topics are written for it', async () => {
+  const w = await world({ config: { ai: undefined } });
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    const [added] = (await ok(pod, 'profile.addFacts', ['Follows chess'])).added;
+    assert.equal((await factOf(pod, 'Follows chess')).topicsStatus, 'pending', 'nothing makes its topics');
+    const none = { complete: false, findingTopics: [], toReview: [], noTopics: ['Follows chess'] };
+    assert.deepEqual((await profile(pod)).setup, none);
+    assert.deepEqual((await ok(pod, 'reading.status')).setup, none);
+
+    await ok(pod, 'profile.addTopics', added.id, ['Chess olympiad']);
+    assert.deepEqual((await profile(pod)).setup.toReview, ['Follows chess']);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});

@@ -40,12 +40,12 @@ export function topicReviewed(fact: Fact, topic: Pick<TopicRow, 'provenance' | '
   return !needsReview(fact) || PERSON_MADE.has(topic.provenance) || (at !== undefined && topic.createdAt.getTime() <= Date.parse(at));
 }
 
-/** Where setup stands over the given facts and their shown topics. Combination topics are left out. */
-export function setupOf(all: Fact[], topicsOf: (factId: string) => TopicRow[]): ProfileSetup {
+/** Where setup stands over the given facts and their shown topics. Combination topics are left out. Without an AI service nothing makes topics, so a pending fact has none. */
+export function setupOf(all: Fact[], topicsOf: (factId: string) => TopicRow[], hasAi: boolean): ProfileSetup {
   const setup: ProfileSetup = { complete: true, findingTopics: [], toReview: [], noTopics: [] };
   for (const fact of all.filter(needsReview)) {
     const rows = topicsOf(fact.id).filter((t) => t.provenance !== 'combo');
-    if (fact.topicsStatus === 'pending') setup.findingTopics.push(fact.statement);
+    if (fact.topicsStatus === 'pending' && hasAi) setup.findingTopics.push(fact.statement);
     else if (fact.topicsStatus !== 'done' || rows.length === 0) setup.noTopics.push(fact.statement);
     else if (rows.some((t) => !topicReviewed(fact, t))) setup.toReview.push(fact.statement);
   }
@@ -54,10 +54,10 @@ export function setupOf(all: Fact[], topicsOf: (factId: string) => TopicRow[]): 
 }
 
 /** Setup over every saved fact, with one read of the topics. */
-export async function readSetup(all?: Fact[]): Promise<ProfileSetup> {
+export async function readSetup(hasAi: boolean, all?: Fact[]): Promise<ProfileSetup> {
   const byFact = new Map<string, TopicRow[]>();
   for (const t of await topics().getActive()) if (t.factId) byFact.set(t.factId, [...(byFact.get(t.factId) ?? []), t]);
-  return setupOf(all ?? (await facts().getFacts()), (id) => byFact.get(id) ?? []);
+  return setupOf(all ?? (await facts().getFacts()), (id) => byFact.get(id) ?? [], hasAi);
 }
 
 /** Topic texts from outside the pod, checked and tidied: 1 to 12 of them, each 1 to 80 characters on one line. */
@@ -94,7 +94,7 @@ export function createProfile(server: () => Promise<DataServerInfo>, hasAi: bool
           ...(reviewedAt(fact) ? { reviewedAt: reviewedAt(fact) } : {}),
         });
       }
-      return { facts: views, ...(offset + PAGE < all.length ? { nextOffset: offset + PAGE } : {}), setup: await readSetup(all) };
+      return { facts: views, ...(offset + PAGE < all.length ? { nextOffset: offset + PAGE } : {}), setup: await readSetup(hasAi, all) };
     },
 
     async addFacts(statements) {

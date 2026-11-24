@@ -130,7 +130,7 @@ export function createServices(context: ServicesContext): { services: PodService
         return (require('mera-news-client/dist/lib/scheduler/AppScheduler') as { AppScheduler: { trigger(name: string): Promise<string> } }).AppScheduler.trigger('feed-sync');
       },
       async status() {
-        const [snapshot, picks, known, setup] = await Promise.all([takeSnapshot(snapshotInputs), feed(), dataServer, readSetup()]);
+        const [snapshot, picks, known, setup] = await Promise.all([takeSnapshot(snapshotInputs), feed(), dataServer, readSetup(!!cfg.ai)]);
         return { ...buildStatus(cfg, control, snapshot, picks.length, known), ...(setup.complete ? {} : { setup }) };
       },
       async set(change) {

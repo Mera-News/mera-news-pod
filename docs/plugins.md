@@ -59,7 +59,7 @@ A fact saved through `addFacts` needs review: the person sees its topics and kee
 
 - Each fact in `profile.get` has `needsReview` and, once reviewed, `reviewedAt`. Each topic has `reviewed`, which is false only for a topic of a fact that needs review, made after its last review. Topics the person added or follows always count as reviewed.
 - `editTopics({ remove, reviewed })` removes the topics the person turned down, then marks the facts in `reviewed` (fact ids) as reviewed. It refuses the whole call, before anything changes, for an unknown fact (`unknown_fact`) or one whose topics are still being made (`topics_pending`).
-- `profile.get` returns `setup`, counted over every fact, not only the page: `complete`, and the statements of facts still `findingTopics`, waiting in `toReview`, or left with `noTopics` (add topics with `addTopics`, or remove the fact). Topics made by combining facts are left out.
+- `profile.get` returns `setup`, counted over every fact, not only the page: `complete`, and the statements of facts still `findingTopics`, waiting in `toReview`, or left with `noTopics` (add topics with `addTopics`, or remove the fact). In a pod with no AI service nothing makes topics, so a fact still waiting for them is in `noTopics`. Topics made by combining facts are left out.
 - `reading.status()` carries the same `setup` while it is not complete. It is something to offer the person, never a reason to stop reading or answering.
 
 ## Reading picks without taking them

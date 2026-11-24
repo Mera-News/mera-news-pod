@@ -142,9 +142,14 @@ async function main() {
         case 'plantFact': { // a fact with the given topics status and topics, without any model call
           const { addFact } = client<{ addFact(s: string, m?: object, q?: object, o?: object): Promise<{ id: string }> }>('database/services/fact-service');
           const { createTopics } = client<{ createTopics(i: object[]): Promise<{ id: string }[]> }>('database/services/topic-service');
-          const fact = await addFact(msg.arg.statement, undefined, undefined, { topicsStatus: msg.arg.status });
+          const fact = await addFact(msg.arg.statement, msg.arg.metadata, undefined, { topicsStatus: msg.arg.status });
           const topics = await createTopics((msg.arg.topics ?? []).map((t: { text: string; provenance?: string }) => ({ factId: fact.id, text: t.text, weight: 1, provenance: t.provenance ?? 'llm' })));
           return reply({ id: fact.id, topicIds: topics.map((t) => t.id) });
+        }
+        case 'plantTopic': { // one topic on a saved fact, as another writer (a combination pass, say) would add it
+          const { createTopics } = client<{ createTopics(i: object[]): Promise<{ id: string }[]> }>('database/services/topic-service');
+          const [topic] = await createTopics([{ factId: msg.arg.factId, text: msg.arg.text, weight: 1, provenance: msg.arg.provenance }]);
+          return reply(topic.id);
         }
         case 'factRows': // the saved facts as the client stores them, with fields profile.get does not show
           return reply(await client<{ getFacts(): Promise<unknown[]> }>('database/services/fact-service').getFacts());

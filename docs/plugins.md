@@ -53,6 +53,15 @@ The types are in `mera-news-pod/plugin-api`. Import types only: a plugin never i
 
 `display`, `commands`, `events`, `reading.readNow` and `profile.addTopics` are in version 2 only. A pod error carries a `code`, a `message` and a `next` step you can show as they are.
 
+### Reviewing topics
+
+A fact saved through `addFacts` needs review: the person sees its topics and keeps or removes each. Facts saved any other way, such as in the Mera News app, count as reviewed.
+
+- Each fact in `profile.get` has `needsReview` and, once reviewed, `reviewedAt`. Each topic has `reviewed`, which is false only for a topic of a fact that needs review, made after its last review. Topics the person added or follows always count as reviewed.
+- `editTopics({ remove, reviewed })` removes the topics the person turned down, then marks the facts in `reviewed` (fact ids) as reviewed. It refuses the whole call, before anything changes, for an unknown fact (`unknown_fact`) or one whose topics are still being made (`topics_pending`).
+- `profile.get` returns `setup`, counted over every fact, not only the page: `complete`, and the statements of facts still `findingTopics`, waiting in `toReview`, or left with `noTopics` (add topics with `addTopics`, or remove the fact). Topics made by combining facts are left out.
+- `reading.status()` carries the same `setup` while it is not complete. It is something to offer the person, never a reason to stop reading or answering.
+
 ## Reading picks without taking them
 
 The pod hands each pick out once. `suggestions.get` without `since` returns the picks after the last one delivered, and every call moves that point, whoever makes it. So a plugin that only shows picks must pass `peek: true`:

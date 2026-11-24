@@ -11,7 +11,7 @@ import { createLedger, PodError } from './ledger';
 import { readFeed } from './picks';
 import { createModelService } from './model';
 import { createNewsService } from './news';
-import { createProfile } from './profile';
+import { createProfile, readSetup } from './profile';
 import { buildStatus, fetchLimits, judge, takeSnapshot } from './status';
 import { watchFinishedStories, watchTopicsReady } from './watchers';
 import { client } from './client';
@@ -130,8 +130,8 @@ export function createServices(context: ServicesContext): { services: PodService
         return (require('mera-news-client/dist/lib/scheduler/AppScheduler') as { AppScheduler: { trigger(name: string): Promise<string> } }).AppScheduler.trigger('feed-sync');
       },
       async status() {
-        const [snapshot, picks, known] = await Promise.all([takeSnapshot(snapshotInputs), feed(), dataServer]);
-        return buildStatus(cfg, control, snapshot, picks.length, known);
+        const [snapshot, picks, known, setup] = await Promise.all([takeSnapshot(snapshotInputs), feed(), dataServer, readSetup()]);
+        return { ...buildStatus(cfg, control, snapshot, picks.length, known), ...(setup.complete ? {} : { setup }) };
       },
       async set(change) {
         if (change.paused !== undefined) control.setPaused(change.paused);

@@ -19,6 +19,8 @@ export interface TopicView {
   /** -1 shows less of it, 1 shows more; it never hides a topic. */
   weight: number;
   source: TopicSource;
+  /** False only for a topic of a fact that needs review, made after the person last reviewed it. */
+  reviewed: boolean;
 }
 
 export interface FactView {
@@ -28,12 +30,32 @@ export interface FactView {
   /** ISO time the fact was saved. */
   addedAt: string;
   topics: TopicView[];
+  /** True for a fact saved through `addFacts`: the person is shown its topics to keep or remove. */
+  needsReview: boolean;
+  /** ISO time the person last reviewed this fact's topics (`editTopics({ reviewed })`). */
+  reviewedAt?: string;
+}
+
+/**
+ * Where setting up the profile stands, over every saved fact, not one page. Each list holds fact
+ * statements. Only facts that need review count; combination topics are left out. A status the
+ * assistant works toward, never a reason to stop answering.
+ */
+export interface ProfileSetup {
+  complete: boolean;
+  /** Topics are still being made. */
+  findingTopics: string[];
+  /** Topics are ready and wait for the person to keep or remove them. */
+  toReview: string[];
+  /** Topics failed or none were made: add topics or remove the fact. */
+  noTopics: string[];
 }
 
 export interface ProfileView {
   facts: FactView[];
   /** Pass to `profile.get` for the next page; absent on the last one. */
   nextOffset?: number;
+  setup: ProfileSetup;
 }
 
 export interface AddFactsResult {
@@ -60,6 +82,12 @@ export interface RemoveFactsResult {
 export interface TopicEdit {
   remove?: string[];
   weight?: { topicId: string; weight: number }[];
+  /**
+   * Fact ids whose topics the person has just reviewed, stamped after the removes. An unknown fact
+   * (`unknown_fact`) or one whose topics are still being made (`topics_pending`) refuses the whole
+   * call before anything changes.
+   */
+  reviewed?: string[];
 }
 
 export interface TopicEditResult {
@@ -118,6 +146,8 @@ export interface PodStatus {
   /** Null when the pod has no AI service. */
   ai: { host: string; model: string } | null;
   dataServer: { host: string };
+  /** Present only while setting up the profile is not finished. It never blocks reading or chat. */
+  setup?: ProfileSetup;
 }
 
 /** What the data server answers to a GraphQL request, as it sent it. */

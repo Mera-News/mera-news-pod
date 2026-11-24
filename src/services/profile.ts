@@ -2,15 +2,17 @@
 // Every write goes through the client's own functions, so a fact added here is treated exactly like
 // one added in the app: its topics are generated, and a removed topic is never generated back.
 import type { DataServerInfo } from './status';
-import type { AddFactsResult, AddTopicsResult, FactView, PodServices, RemoveFactsResult, TopicEditResult, TopicSource, TopicView, TopicsStatus } from '../plugin-api';
+import type { AddFactsResult, AddTopicsResult, FactView, PodServices, ProfileSetup, RemoveFactsResult, TopicEditResult, TopicSource, TopicView, TopicsStatus } from '../plugin-api';
 import { client } from './client';
 import { PodError } from './ledger';
 
-type Fact = { id: string; statement: string; topicsStatus: string | null; createdAt: string; questionnaireAttribute?: string };
-type TopicRow = { id: string; text: string; weight: number; status: string; provenance: string; pendingDeleteAt: number | null };
+type Fact = { id: string; statement: string; topicsStatus: string | null; createdAt: string; questionnaireAttribute?: string; metadata?: Record<string, unknown> };
+type TopicRow = { id: string; factId?: string | null; text: string; weight: number; status: string; provenance: string; pendingDeleteAt: number | null; createdAt: Date };
 
-const facts = () => client<{ getFacts(): Promise<Fact[]>; deleteFact(id: string): Promise<void> }>('database/services/fact-service');
-const topics = () => client<{ getByFact(factId: string): Promise<TopicRow[]>; setWeight(id: string, weight: number): Promise<void> }>('database/services/topic-service');
+const facts = () =>
+  client<{ getFacts(): Promise<Fact[]>; deleteFact(id: string): Promise<void>; patchMetadata(id: string, patch: Record<string, unknown>): Promise<unknown> }>('database/services/fact-service');
+const topics = () =>
+  client<{ getByFact(factId: string): Promise<TopicRow[]>; getActive(): Promise<TopicRow[]>; setWeight(id: string, weight: number): Promise<void> }>('database/services/topic-service');
 
 export const PAGE = 50;
 export const MAX_STATEMENT = 300;
@@ -20,6 +22,43 @@ const CONFLICT_NEXT = 'remove the fact it conflicts with first, or reword this o
 
 const SOURCES: Record<string, TopicSource> = { llm: 'generated', migration: 'generated', exploration: 'generated', combo: 'generated', user: 'added', feedback: 'added', tracked: 'followed' };
 const shown = (rows: TopicRow[]) => rows.filter((t) => t.pendingDeleteAt == null && t.status === 'active');
+
+// Only addFacts writes this mark, so facts saved before it existed, or from the app, count as reviewed.
+const REVIEW_REQUIRED = 'reviewRequired';
+// The app's own key (topic-plan-resolution), a one-item list holding an ISO time.
+const REVIEWED_AT = 'topicsReviewedAt';
+const PERSON_MADE = new Set(['user', 'feedback', 'tracked']);
+const needsReview = (f: Fact) => f.metadata?.[REVIEW_REQUIRED] === true;
+const reviewedAt = (f: Fact): string | undefined => {
+  const at = f.metadata?.[REVIEWED_AT];
+  return Array.isArray(at) && typeof at[0] === 'string' ? at[0] : undefined;
+};
+
+/** A topic is reviewed when its fact needs no review, the person made it, or it is no newer than the fact's review. */
+export function topicReviewed(fact: Fact, topic: Pick<TopicRow, 'provenance' | 'createdAt'>): boolean {
+  const at = reviewedAt(fact);
+  return !needsReview(fact) || PERSON_MADE.has(topic.provenance) || (at !== undefined && topic.createdAt.getTime() <= Date.parse(at));
+}
+
+/** Where setup stands over the given facts and their shown topics. Combination topics are left out. */
+export function setupOf(all: Fact[], topicsOf: (factId: string) => TopicRow[]): ProfileSetup {
+  const setup: ProfileSetup = { complete: true, findingTopics: [], toReview: [], noTopics: [] };
+  for (const fact of all.filter(needsReview)) {
+    const rows = topicsOf(fact.id).filter((t) => t.provenance !== 'combo');
+    if (fact.topicsStatus === 'pending') setup.findingTopics.push(fact.statement);
+    else if (fact.topicsStatus !== 'done' || rows.length === 0) setup.noTopics.push(fact.statement);
+    else if (rows.some((t) => !topicReviewed(fact, t))) setup.toReview.push(fact.statement);
+  }
+  setup.complete = !setup.findingTopics.length && !setup.toReview.length && !setup.noTopics.length;
+  return setup;
+}
+
+/** Setup over every saved fact, with one read of the topics. */
+export async function readSetup(all?: Fact[]): Promise<ProfileSetup> {
+  const byFact = new Map<string, TopicRow[]>();
+  for (const t of await topics().getActive()) if (t.factId) byFact.set(t.factId, [...(byFact.get(t.factId) ?? []), t]);
+  return setupOf(all ?? (await facts().getFacts()), (id) => byFact.get(id) ?? []);
+}
 
 /** Topic texts from outside the pod, checked and tidied: 1 to 12 of them, each 1 to 80 characters on one line. */
 export function cleanTopicTexts(texts: unknown): string[] {
@@ -50,10 +89,12 @@ export function createProfile(server: () => Promise<DataServerInfo>, hasAi: bool
           statement: fact.statement,
           topicsStatus: (fact.topicsStatus ?? 'none') as TopicsStatus,
           addedAt: fact.createdAt,
-          topics: rows.map((t): TopicView => ({ id: t.id, text: t.text, weight: t.weight, source: SOURCES[t.provenance] ?? 'generated' })),
+          topics: rows.map((t): TopicView => ({ id: t.id, text: t.text, weight: t.weight, source: SOURCES[t.provenance] ?? 'generated', reviewed: topicReviewed(fact, t) })),
+          needsReview: needsReview(fact),
+          ...(reviewedAt(fact) ? { reviewedAt: reviewedAt(fact) } : {}),
         });
       }
-      return { facts: views, ...(offset + PAGE < all.length ? { nextOffset: offset + PAGE } : {}) };
+      return { facts: views, ...(offset + PAGE < all.length ? { nextOffset: offset + PAGE } : {}), setup: await readSetup(all) };
     },
 
     async addFacts(statements) {
@@ -113,6 +154,9 @@ export function createProfile(server: () => Promise<DataServerInfo>, hasAi: bool
             return attribute ? { statement, questionnaire: { attribute }, skillId: 'topics/residence' } : { statement };
           }),
         );
+        // shortcut: a second write right after the save, since commitFactChoices takes no metadata; a crash between them leaves the fact counted as reviewed. Upgrade when the client takes metadata on commit.
+        const before = new Set(saved.map((f) => f.id));
+        for (const f of savedFacts) if (!before.has(f.id)) await facts().patchMetadata(f.id, { [REVIEW_REQUIRED]: true });
         result.added.push(...savedFacts.map((f) => ({ id: f.id, statement: f.statement })));
       }
       if (result.added.some((a) => isHomeEntry({ statement: a.statement })) && (await server().then((d) => d.limits.includes('place lookup') || d.placesNotLoaded))) {
@@ -175,6 +219,16 @@ export function createProfile(server: () => Promise<DataServerInfo>, hasAi: bool
       const exists = (id: string) => database.get('topics').find(id).then(() => true, () => false);
       const result: TopicEditResult = { results: [] };
 
+      // Checked before anything changes, so a refusal leaves the topics as they were.
+      const toReview = edit.reviewed ?? [];
+      if (toReview.length) {
+        const saved = new Map((await facts().getFacts()).map((f) => [f.id, f]));
+        if (toReview.some((id) => !saved.has(id))) throw new PodError('unknown_fact', 'No saved fact has this id. Nothing was changed.', 'call get_profile for the fact ids');
+        if (toReview.some((id) => saved.get(id)!.topicsStatus === 'pending')) {
+          throw new PodError('topics_pending', 'Topics for this fact are still being made. Nothing was changed.', 'wait until its topics are ready, then review them');
+        }
+      }
+
       for (const [index, id] of (edit.remove ?? []).entries()) {
         if (!(await exists(id))) {
           result.results.push({ op: 'remove', index, ok: false, id, error: 'no topic with this id' });
@@ -196,6 +250,9 @@ export function createProfile(server: () => Promise<DataServerInfo>, hasAi: bool
           result.results.push({ op: 'weight', index, ok: true, id: topicId });
         }
       }
+      // One merge inside one write, so a concurrent metadata change is kept.
+      const at = new Date().toISOString();
+      for (const id of toReview) await facts().patchMetadata(id, { [REVIEWED_AT]: [at] });
       return result;
     },
   };

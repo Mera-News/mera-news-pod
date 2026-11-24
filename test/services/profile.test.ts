@@ -324,3 +324,138 @@ test('topics written for a fact are saved and mark it done; removed and repeated
     await w.close();
   }
 });
+
+// --- Reviewing a fact's topics, and where setup stands ---------------------------------------------
+
+const MARK = { reviewRequired: true };
+const factOf = async (pod: Pod, statement: string) => (await profile(pod)).facts.find((f: any) => f.statement === statement);
+
+test('a fact saved through addFacts needs review; one saved any other way, or added again, counts as reviewed', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('plantFact', { statement: 'Follows sailing', status: 'done', topics: [{ text: 'sailing' }] });
+    const failed = await pod.ask('plantFact', { statement: 'Follows tennis', status: 'error' });
+    await ok(pod, 'profile.addFacts', ['Follows chess', 'Follows tennis']);
+    const view = await settled(pod);
+    const by = (s: string) => view.facts.find((f: any) => f.statement === s);
+    assert.equal(by('Follows chess').needsReview, true);
+    assert.ok(by('Follows chess').topics.every((t: any) => t.reviewed === false));
+    assert.equal(by('Follows sailing').needsReview, false);
+    assert.ok(by('Follows sailing').topics.every((t: any) => t.reviewed === true));
+    assert.equal(by('Follows tennis').id, failed.id);
+    assert.equal(by('Follows tennis').needsReview, false, 'a retried fact gets no mark');
+    assert.deepEqual(view.setup, { complete: false, findingTopics: [], toReview: ['Follows chess'], noTopics: [] });
+    assert.deepEqual((await ok(pod, 'reading.status')).setup, view.setup, 'status carries it while it is not complete');
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('a review after the removes stamps the fact and its topics read reviewed; a topic made later reads unreviewed', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await ok(pod, 'profile.addFacts', ['Follows chess']);
+    const fact = (await settled(pod)).facts[0];
+    const removed = fact.topics[0];
+    const edit = await ok(pod, 'profile.editTopics', { remove: [removed.id], reviewed: [fact.id] });
+    assert.deepEqual(edit.results, [{ op: 'remove', index: 0, ok: true, id: removed.id }]);
+
+    const after = await profile(pod);
+    assert.ok(Date.parse(after.facts[0].reviewedAt) > 0);
+    assert.ok(!after.facts[0].topics.some((t: any) => t.id === removed.id));
+    assert.ok(after.facts[0].topics.every((t: any) => t.reviewed === true));
+    assert.equal(after.setup.complete, true);
+    assert.equal((await ok(pod, 'reading.status')).setup, undefined, 'a complete setup is not in status');
+
+    await new Promise((r) => setTimeout(r, 5));
+    await ok(pod, 'profile.addTopics', fact.id, ['Chess olympiad']);
+    const later = await profile(pod);
+    assert.equal(later.facts[0].topics.find((t: any) => t.text === 'Chess olympiad').reviewed, false);
+    assert.deepEqual(later.setup.toReview, ['Follows chess']);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('a review of a fact still finding topics, or of an unknown fact, is refused and changes nothing', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('holdReads', true);
+    const pending = await pod.ask('plantFact', { statement: 'Follows sailing', status: 'pending', metadata: MARK, topics: [{ text: 'sailing' }] });
+    for (const [id, code] of [[pending.id, 'topics_pending'], ['no-such-fact', 'unknown_fact']]) {
+      const reply = await call(pod, 'profile.editTopics', { remove: [pending.topicIds[0]], reviewed: [id] });
+      assert.equal(reply.error?.code, code);
+    }
+    const view = await factOf(pod, 'Follows sailing');
+    assert.equal(view.topics.length, 1, 'the remove in the refused call did not run');
+    assert.equal(view.reviewedAt, undefined);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('setup counts a fact past the first page of 50', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('holdReads', true);
+    for (let i = 0; i < 50; i++) await pod.ask('plantFact', { statement: `Interest number ${i}`, status: 'done', topics: [{ text: `topic ${i}` }] });
+    await pod.ask('plantFact', { statement: 'Follows sailing', status: 'pending', metadata: MARK });
+    const first = await profile(pod);
+    assert.equal(first.nextOffset, 50);
+    assert.ok(!first.facts.some((f: any) => f.statement === 'Follows sailing'));
+    assert.deepEqual(first.setup, { complete: false, findingTopics: ['Follows sailing'], toReview: [], noTopics: [] });
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('a combination topic made after the review does not reopen setup', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    const fact = await pod.ask('plantFact', { statement: 'Follows chess', status: 'done', metadata: MARK, topics: [{ text: 'chess' }] });
+    assert.deepEqual((await profile(pod)).setup.toReview, ['Follows chess']);
+    await ok(pod, 'profile.editTopics', { reviewed: [fact.id] });
+    await new Promise((r) => setTimeout(r, 5));
+    await pod.ask('plantTopic', { factId: fact.id, text: 'chess in Utrecht', provenance: 'combo' });
+    const view = await profile(pod);
+    assert.equal(view.facts[0].topics.length, 2);
+    assert.equal(view.setup.complete, true);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('a fact needing review with no topics keeps setup open until it gets topics or is removed', async () => {
+  const w = await world();
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('holdReads', true);
+    const empty = await pod.ask('plantFact', { statement: 'Follows chess', status: 'done', metadata: MARK, topics: [] });
+    const failed = await pod.ask('plantFact', { statement: 'Follows sailing', status: 'error', metadata: MARK, topics: [{ text: 'sailing', provenance: 'combo' }] });
+    assert.deepEqual((await profile(pod)).setup, { complete: false, findingTopics: [], toReview: [], noTopics: ['Follows chess', 'Follows sailing'] });
+
+    await ok(pod, 'profile.addTopics', empty.id, ['Chess']);
+    await ok(pod, 'profile.editTopics', { reviewed: [empty.id] });
+    await ok(pod, 'profile.removeFacts', [failed.id]);
+    assert.deepEqual((await profile(pod)).setup, { complete: true, findingTopics: [], toReview: [], noTopics: [] });
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});

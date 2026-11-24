@@ -80,6 +80,9 @@ export const NO_AI_FIX =
   'This pod does not rate the news on its own. Pick for the person yourself: call news_for_profile, or get_profile and then search_news for their topics, and say in one sentence why each story matters to them. No AI service or setup is needed.';
 const NO_AI_NO_FACTS =
   'Nothing is saved yet. Offer to set up their news profile, one question at a time: where they live first, then their work, then the news they care about. Each question can be skipped. Read each fact back and ask before saving it.';
+// A suggestions hint can reach the person on a plugin's page, so in news-only mode it is written for them.
+const NO_AI_HINT_NO_FACTS = 'Nothing is saved about what you want to read yet. Ask your assistant to set up your news profile.';
+const NO_AI_HINT = 'This pod makes no picks on its own. Ask your assistant for the news.';
 
 export interface SnapshotInputs {
   noAi?: boolean;
@@ -121,7 +124,7 @@ export function problemsOf(s: Snapshot): PodProblem[] {
     fix: 'The data server refuses the pod\'s key, so no news can be fetched. Set dataApiKey in secrets.json (or MERA_POD_DATA_API_KEY) to the key the data server expects, then restart the pod.',
   };
   // With no AI service no read runs, so only what the news tools need is said.
-  if (s.noAi) return [{ code: 'no_ai_service', who: 'assistant', fix: NO_AI_FIX }, ...(s.dataKeyRefused ? [dataKeyRefused] : [])];
+  if (s.noAi) return [{ code: 'no_ai_service', who: 'assistant', fix: s.facts === 0 ? NO_AI_NO_FACTS : NO_AI_FIX }, ...(s.dataKeyRefused ? [dataKeyRefused] : [])];
   const problems: PodProblem[] = [];
   if (s.aiKeyRefused) {
     problems.push({
@@ -181,11 +184,11 @@ export function judge(s: Snapshot, paused: boolean, returned = 0, now = Date.now
     hint = `${blocking.fix} ${blocking.who === 'person' && !s.noAi ? `Mera tries again ${when(nextReadAt, now)}.` : ''}`.trim();
   } else if (s.facts === 0) {
     state = 'no_facts';
-    hint = s.noAi ? NO_AI_NO_FACTS : 'Nothing is saved about what you want to read yet, so there is nothing to look for. Add a fact about yourself or an interest, then check again in a few minutes.';
+    hint = s.noAi ? NO_AI_HINT_NO_FACTS : 'Nothing is saved about what you want to read yet, so there is nothing to look for. Add a fact about yourself or an interest, then check again in a few minutes.';
   } else if (s.noAi) {
     // Nothing reads here, so neither topics nor a first read are waited for.
     state = 'ok';
-    hint = NO_AI_FIX;
+    hint = NO_AI_HINT;
   } else if (s.topics === 0 && s.topicsPending > 0) {
     state = 'topics_pending';
     hint = 'Topics are still being made from your saved facts. Check again in a few minutes.';

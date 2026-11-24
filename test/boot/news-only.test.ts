@@ -37,14 +37,14 @@ test('news-only: the pod starts with no ai, sends nothing to any AI origin, and 
     const status = await ok(pod, 'reading.status');
     assert.deepEqual(status.problems.map((p: { code: string }) => p.code), ['no_ai_service']);
     assert.equal(status.problems[0].who, 'assistant', 'the person\'s own assistant picks instead');
-    assert.match(status.problems[0].fix, /^This pod does not rate the news on its own\. Pick for the person yourself/);
+    assert.match(status.problems[0].fix, /^Nothing is saved yet\. Offer to set up their news profile/, 'with nothing saved, the assistant is told to set up the profile');
     assert.equal(status.ai, null);
     assert.equal(status.reading, 'paused', 'nothing can read without an AI service');
     assert.equal(status.nextReadAt, null);
 
     const empty = await ok(pod, 'suggestions.get', { limit: 10 });
     assert.equal(empty.state, 'no_facts');
-    assert.match(empty.hint, /^Nothing is saved yet\. Offer to set up their news profile/);
+    assert.match(empty.hint, /Ask your assistant to set up your news profile\.$/, 'a page shows this to the person');
 
     const news = await ok(pod, 'news.graphql', { operationName: 'NewsServerStatus', query: 'query NewsServerStatus { newsServerStatus { placesSeeded } }' });
     assert.ok(news.data || news.errors, 'the data server answered');
@@ -65,7 +65,8 @@ test('news-only: the pod starts with no ai, sends nothing to any AI origin, and 
     const suggestions = await ok(pod, 'suggestions.get', { limit: 10 });
     assert.equal(suggestions.state, 'ok');
     assert.deepEqual(suggestions.picks, []);
-    assert.match(suggestions.hint, /^This pod does not rate the news on its own/);
+    assert.equal(suggestions.hint, 'This pod makes no picks on its own. Ask your assistant for the news.');
+    assert.match((await ok(pod, 'reading.status')).problems[0].fix, /^This pod does not rate the news on its own\. Pick for the person yourself/);
     assert.doesNotMatch(suggestions.hint, /pod\.json|key/i);
 
     assert.equal(await pod.ask('trigger'), 'paused', 'a read is held');

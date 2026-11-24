@@ -27,7 +27,8 @@ export function cleanTopicTexts(texts: unknown): string[] {
   if (!Array.isArray(texts) || texts.length < 1 || texts.length > MAX_TOPICS) throw bad();
   return texts.map((t) => {
     const text = typeof t === 'string' ? t.replace(/\s+/g, ' ').trim() : '';
-    if (text.length < 1 || text.length > MAX_TOPIC || /\p{Cc}/u.test(text)) throw bad();
+    // Format characters (bidi overrides, invisible marks) are refused, except the joiners some scripts need.
+    if (text.length < 1 || text.length > MAX_TOPIC || /(?![\u200c\u200d])[\p{Cc}\p{Cf}]/u.test(text)) throw bad();
     return text;
   });
 }

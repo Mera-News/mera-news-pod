@@ -4,6 +4,7 @@
 import type { Level } from '../host/telemetry';
 import type { CommandResult, PodServices } from '../plugin-api';
 import { PodError } from './ledger';
+import { client } from './client';
 
 type Model = { id: string };
 type Returns = { table: string; many?: boolean; path?: string };
@@ -11,7 +12,6 @@ type Registry = {
   COMMANDS: Record<string, (...args: unknown[]) => Promise<unknown>>;
   COMMAND_REGISTRY_VERSION: number;
 };
-const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
 
 /** The caller runs another schema or command registry than the pod; `which` is the side that is older. */
 export class VersionMismatch extends PodError {

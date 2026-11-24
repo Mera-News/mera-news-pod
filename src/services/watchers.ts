@@ -1,10 +1,10 @@
+import { client } from './client';
 // Two things the pod does on its own once the client runs. The first read starts as soon as a
 // fact's topics are ready, rather than at the next scheduled read. The second keeps the pick ledger
 // current as stories finish being rated, so a story that comes and goes is still remembered.
 type Fact = { id: string; topicsStatus: string | null };
 type Subscription = { unsubscribe(): void };
 
-const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
 
 /**
  * Starts one read the first time a fact has finished topics. A pause covers it. A read already

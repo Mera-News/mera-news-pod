@@ -3,9 +3,9 @@
 import type { LoadedConfig } from '../config';
 import type { Control } from '../control';
 import type { PodProblem, PodStatus, SuggestionsState } from '../plugin-api';
+import { client } from './client';
 
 type Fact = { id: string; topicsStatus: string | null };
-const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
 
 /** Shown when the data server will not say what it offers: what a self-hosted server may lack. */
 export const ALL_LIMITS = ['followed stories', 'place lookup', 'story grouping refresh', 'windowed headlines', 'world headlines'];

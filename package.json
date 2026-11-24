@@ -17,6 +17,10 @@
       "types": "./build/testing/index.d.ts",
       "default": "./build/testing/index.js"
     },
+    "./embed": {
+      "types": "./build/embed.d.ts",
+      "default": "./build/embed.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {

@@ -3,11 +3,11 @@
 // one added in the app: its topics are generated, and a removed topic is never generated back.
 import type { DataServerInfo } from './status';
 import type { AddFactsResult, FactView, PodServices, RemoveFactsResult, TopicEditResult, TopicSource, TopicView, TopicsStatus } from '../plugin-api';
+import { client } from './client';
 
 type Fact = { id: string; statement: string; topicsStatus: string | null; createdAt: string; questionnaireAttribute?: string };
 type TopicRow = { id: string; text: string; weight: number; status: string; provenance: string; pendingDeleteAt: number | null };
 
-const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
 const facts = () => client<{ getFacts(): Promise<Fact[]>; deleteFact(id: string): Promise<void> }>('database/services/fact-service');
 const topics = () => client<{ getByFact(factId: string): Promise<TopicRow[]>; setWeight(id: string, weight: number): Promise<void> }>('database/services/topic-service');
 

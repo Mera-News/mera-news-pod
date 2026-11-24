@@ -1,6 +1,7 @@
 // What the Feed holds right now, as picks. A pick is one story: a headline, a link and a one-line
 // reason the model wrote. The article's own text is never read here, so it cannot be returned.
 import type { PickLevel, PickView } from '../plugin-api';
+import { client } from './client';
 
 type Suggestion = {
   articleId: string;
@@ -17,7 +18,6 @@ type Suggestion = {
 };
 type FeedItem = { id: string; suggestion: Suggestion; memberIds: string[] };
 
-const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
 
 export interface Candidate {
   memberIds: string[];

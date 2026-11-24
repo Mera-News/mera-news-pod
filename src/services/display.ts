@@ -2,8 +2,8 @@
 // A plugin gets this one function and never the database behind it.
 import type { PodServices, Snapshot } from '../plugin-api';
 import { PodError } from './ledger';
+import { client } from './client';
 
-const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
 
 const isHashes = (v: unknown): v is Record<string, string> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) && Object.values(v).every((h) => typeof h === 'string');

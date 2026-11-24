@@ -42,7 +42,14 @@ export interface Pod {
 
 const READY_TIMEOUT_MS = 120_000;
 const DRAIN_TIMEOUT_MS = 10_000;
-const TASK_MODULES = ['data-cleanup', 'feed-sync', 'feedback-cycle', 'inference-recover', 'persona-geo', 'persona-hygiene', 'persona-migration', 'sanity-backfill'];
+/** The client's dist folder, or null in a bundle, where the client is not separate files. */
+function clientDistDir(): string | null {
+  try {
+    return path.join(fs.realpathSync(path.dirname(require.resolve('mera-news-client/package.json'))), 'dist') + path.sep;
+  } catch {
+    return null;
+  }
+}
 
 function readHarness(cfg: LoadedConfig) {
   const dir = cfg.paths.harnessDir;
@@ -96,16 +103,16 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
 
   try {
     // 2. The database version, read from the one client module that is safe to load first.
-    const clientDist = path.join(fs.realpathSync(path.dirname(require.resolve('mera-news-client/package.json'))), 'dist') + path.sep;
-    const schemaFile = path.join(clientDist, 'lib/database/schema.js');
-    const { default: schema } = require(schemaFile) as { default: { version: number } };
+    // Every client require is a literal path so a bundler can follow it; a bundle has no client files on disk.
+    const clientDist = clientDistDir();
+    const { default: schema } = require('mera-news-client/dist/lib/database/schema') as { default: { version: number } };
     guards.guardDatabaseVersion(schema.version);
 
     // 3. The reader's own prompt harness, if there is one.
     const harness = readHarness(cfg);
 
     // 4. Nothing else from the client may be loaded yet.
-    assertClientNotLoaded(clientDist, [path.join(clientDist, 'lib/platform/index.js'), path.join(clientDist, 'lib/harnesses/slot-text.js'), schemaFile]);
+    if (clientDist) assertClientNotLoaded(clientDist, ['lib/platform/index.js', 'lib/harnesses/slot-text.js', 'lib/database/schema.js'].map((f) => path.join(clientDist, f)));
 
     // 5. Register the host.
     if (harness) (host as Record<string, unknown>).harness = harness;
@@ -140,7 +147,14 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
       };
     }
     require('mera-news-client/dist/lib/database/index');
-    for (const name of TASK_MODULES) require(`mera-news-client/dist/lib/scheduler/tasks/${name}-task`);
+    require('mera-news-client/dist/lib/scheduler/tasks/data-cleanup-task');
+    require('mera-news-client/dist/lib/scheduler/tasks/feed-sync-task');
+    require('mera-news-client/dist/lib/scheduler/tasks/feedback-cycle-task');
+    require('mera-news-client/dist/lib/scheduler/tasks/inference-recover-task');
+    require('mera-news-client/dist/lib/scheduler/tasks/persona-geo-task');
+    require('mera-news-client/dist/lib/scheduler/tasks/persona-hygiene-task');
+    require('mera-news-client/dist/lib/scheduler/tasks/persona-migration-task');
+    require('mera-news-client/dist/lib/scheduler/tasks/sanity-backfill-task');
     const { inferenceQueue } = require('mera-news-client/dist/lib/inference/InferenceQueue') as { inferenceQueue: { start(): Promise<void>; stop(): Promise<void> } };
     const { AppScheduler } = require('mera-news-client/dist/lib/scheduler/AppScheduler') as { AppScheduler: { tasks: Map<string, unknown> } };
     const { useSchedulerStore } = require('mera-news-client/dist/lib/scheduler/scheduler-store') as { useSchedulerStore: { getState(): { isRunning(name: string): boolean } } };

@@ -1,9 +1,9 @@
 // Tells plugins when what a snapshot serves has changed. WatermelonDB reports every write to a
 // table, because runtime writes never use raw SQL, so one subscription sees reads, jobs and commands.
 import type { PickView, PodServices } from '../plugin-api';
+import { client } from './client';
 
 type Subscription = { unsubscribe(): void };
-const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`) as T;
 
 export const DEBOUNCE_MS = 2000;
 

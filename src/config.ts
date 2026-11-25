@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 
-/** Request changes an endpoint needs whatever the model: Anthropic refuses temperature and top_p (a 400). */
+/** Request changes an endpoint needs whatever the model: this one refuses temperature and top_p with a 400. */
 const ENDPOINT_QUIRKS: Record<string, string[]> = { 'https://api.anthropic.com': ['no-sampling'] };
 
 export class ConfigError extends Error {}

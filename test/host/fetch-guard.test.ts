@@ -83,3 +83,16 @@ test('installed as the global fetch, it blocks other origins and still reaches a
     globalThis.fetch = real;
   }
 });
+
+test('an allowlist given as a Set is read at every request, so an origin can be swapped while the pod runs', async () => {
+  const a = await serve((_req, res) => res.end('a'));
+  const b = await serve((_req, res) => res.end('b'));
+  const allowed = new Set([originOf(a)]);
+  const fetch = guardedFetch(allowed, () => {});
+  assert.equal(await (await fetch(`${originOf(a)}/`)).text(), 'a');
+  await assert.rejects(fetch(`${originOf(b)}/`), { name: 'BlockedRequestError' });
+  allowed.delete(originOf(a));
+  allowed.add(originOf(b));
+  assert.equal(await (await fetch(`${originOf(b)}/`)).text(), 'b');
+  await assert.rejects(fetch(`${originOf(a)}/`), { name: 'BlockedRequestError' });
+});

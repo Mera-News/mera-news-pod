@@ -208,6 +208,19 @@ export interface PodProblem {
   fix: string;
 }
 
+/** An AI service the pod knows. `baseUrl` is null for one the person names by address. */
+export interface AiProvider {
+  id: string;
+  name: string;
+  baseUrl: string | null;
+  /** The model suggested for chat and topics. */
+  chatModel?: string;
+  /** The model suggested for rating articles: a smaller, cheaper one. */
+  relevanceModel?: string;
+  /** True when the service answers GET /models, so `aiService.models` can fill a picker. */
+  listsModels: boolean;
+}
+
 export interface PodStatus {
   reading: ReadingState;
   everyMinutes: number;
@@ -220,10 +233,11 @@ export interface PodStatus {
   problems: PodProblem[];
   /** Features the configured data server does not offer, by plain name. */
   limits: string[];
-  /** Null when the pod has no AI service. */
-  ai: { host: string; model: string } | null;
-  /** An AI service saved through `aiService.set` since this pod started: it runs from the next start. */
-  aiAfterRestart?: { host: string; model: string };
+  /**
+   * The AI service in use, or null when the pod has none. `model` serves chat and topics,
+   * `relevanceModel` rates articles; `reasons` is false while the pod writes no reason for a pick.
+   */
+  ai: { host: string; model: string; relevanceModel: string; reasons: boolean } | null;
   dataServer: { host: string };
   /** Present only while setting up the profile is not finished. It never blocks reading or chat. */
   setup?: ProfileSetup;
@@ -296,13 +310,26 @@ export interface PodServices {
   /** Contract version 2 and later. */
   aiService: {
     /**
-     * Saves the person's OpenAI-compatible AI service: `baseUrl` (https, or http on this computer) and
-     * `model` into pod.json, `apiKey` into secrets.json. Without `apiKey` the saved key is kept for the
-     * same origin and removed for a new one. It runs from the pod's next start, and `reading.status`
-     * names it as `aiAfterRestart` until then. The answer is only `{ set: true }`: the key is never
-     * returned. A bad value fails with code `bad_input` and changes nothing.
+     * Tests, saves and switches to the person's OpenAI-compatible AI service, with no restart.
+     * `baseUrl` is https, or http on this computer; `model` serves chat and topics and
+     * `relevanceModel` (default `model`) rates articles. Without `apiKey` the saved key is used for
+     * the same origin, and none for a new one. `reasons` turns the reason written for each pick on or
+     * off (default: as it is). Before anything is saved, one short request per model goes to the
+     * address: a refusal fails with code `ai_test_failed` and a sentence saying why, and nothing
+     * changes. A bad value fails with `bad_input`. Once saved, the address, models and key go to
+     * pod.json and secrets.json and take effect at once; topics that failed are made again and a
+     * read starts. The answer is only `{ set: true }`: the key is never returned.
      */
-    set(change: { baseUrl: string; model: string; apiKey?: string }): Promise<{ set: true }>;
+    set(change: { baseUrl: string; model: string; relevanceModel?: string; apiKey?: string; reasons?: boolean }): Promise<{ set: true }>;
+    /**
+     * The chat models the service at `baseUrl` lists, sorted, for a picker. Without `apiKey` the
+     * saved key is used for the same origin. Fails with `ai_models_failed` and a sentence saying why.
+     */
+    models(query: { baseUrl: string; apiKey?: string }): Promise<{ models: string[] }>;
+    /** The services the pod knows, with their addresses and suggested models. */
+    providers(): readonly AiProvider[];
+    /** Turns the reason written for each pick on or off. Fails with `no_ai_service` while there is none. */
+    setReasons(on: boolean): Promise<{ set: true }>;
   };
   /** Contract version 2 and later. */
   stories: {

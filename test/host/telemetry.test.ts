@@ -7,6 +7,10 @@ test('a secret is replaced by a literal match wherever it appears, including reg
   assert.equal(redact('key sk-a.b+c and sk-a.b+c again, also k2'), 'key [redacted] and [redacted] again, also [redacted]');
   assert.equal(redact('sk-aXb+c is not it'), 'sk-aXb+c is not it');
   assert.equal(createRedactor([''])('abc'), 'abc');
+  const later: string[] = [];
+  const live = createRedactor(later);
+  later.push('k3');
+  assert.equal(live('a k3'), 'a [redacted]', 'a secret added later is blanked too');
 });
 
 test('every line the sink gets is redacted, errors and context included', () => {

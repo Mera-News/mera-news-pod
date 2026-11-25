@@ -87,10 +87,24 @@ async function plantRows(rows: Row[]) {
 async function main() {
   let pod: Pod;
   let services!: PodServices;
+  // failNextApply makes the next control.apply throw once; queueStarts counts inferenceQueue.start calls.
+  let failApply = false;
+  let queueStarts = 0;
   try {
     pod = await boot({
       sink: (_level, line) => send({ log: line }),
       createServices: (context) => {
+        const realApply = context.control.apply;
+        context.control.apply = () => {
+          if (failApply) {
+            failApply = false;
+            throw new Error('the control could not be applied');
+          }
+          realApply();
+        };
+        const { inferenceQueue } = client<{ inferenceQueue: { start(): Promise<void> } }>('inference/InferenceQueue');
+        const realStart = inferenceQueue.start.bind(inferenceQueue);
+        inferenceQueue.start = () => (queueStarts++, realStart());
         const made = createServices(context);
         services = made.services;
         return made;
@@ -178,6 +192,8 @@ async function main() {
           await retryTopicGeneration(fact.id, fact.statement);
           return reply(null);
         }
+        case 'failNextApply': failApply = true; return reply(null);
+        case 'queueStarts': return reply(queueStarts);
         case 'heap': global.gc?.(); return reply(process.memoryUsage().heapUsed);
         case 'rowCount': {
           const { default: database } = client<{ default: Db }>('database/index');

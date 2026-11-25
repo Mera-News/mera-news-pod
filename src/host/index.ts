@@ -53,7 +53,7 @@ export function createNodeHost(cfg: LoadedConfig, deps: HostDeps) {
   const sentry = createTelemetry(redact, sink, deps.minLevel);
   const appState = createLifecycle();
 
-  const origins = allowedOrigins(cfg);
+  const origins = new Set(allowedOrigins(cfg));
   // The last answer from each server: 401 or 403 from the AI service or the data server means the
   // key is wrong, which only the person can fix.
   const lastStatus = new Map<string, number>();
@@ -108,6 +108,17 @@ export function createNodeHost(cfg: LoadedConfig, deps: HostDeps) {
   const guards = {
     /** True while the latest answer from `origin` refused the request's credentials. */
     refusedBy: (origin: string) => [401, 403].includes(lastStatus.get(origin) ?? 0),
+    /**
+     * Lets the client reach `ai` in place of the AI service it had, every other origin kept, and
+     * blanks its key out of the log first. Its last refusal is forgotten: the key may be new.
+     */
+    allowAi(ai: LoadedConfig['ai']) {
+      if (ai?.apiKey && !cfg.secrets.includes(ai.apiKey)) cfg.secrets.push(ai.apiKey);
+      const next = allowedOrigins({ ...cfg, ai });
+      origins.clear();
+      for (const origin of next) origins.add(origin);
+      if (ai) lastStatus.delete(ai.origin);
+    },
     appState,
     redact,
     installGlobalFetch: () => installGlobalFetch(fetch),

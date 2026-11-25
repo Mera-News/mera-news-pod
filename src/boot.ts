@@ -2,7 +2,7 @@
 // from a newer version, and only then load the client, because the client reads its host as it
 // loads and a second pod or a downgraded database must be refused before anything is opened.
 import fs from 'node:fs';
-import { reasoningFor } from './ai-providers';
+import { aiTransport, switchingTransport, type CreateOpenAiTransport } from './ai-transport';
 import path from 'node:path';
 import { loadConfig, podHome, type LoadedConfig } from './config';
 import { createControl, type Control } from './control';
@@ -28,6 +28,15 @@ export interface ServicesContext {
   log(level: Level, line: string): void;
   /** True while the AI service or the data server refuses the configured key. */
   keyRefused(server: 'ai' | 'data'): boolean;
+  /**
+   * The fetch from before the pod's guard was installed. Only for testing an AI service and listing
+   * its models, at the address the person gave, which the guard does not allow until it is in use.
+   */
+  aiFetch: typeof fetch;
+  /** Reads the AI service from pod.json and secrets.json and switches to it at once, if it holds the key tested. */
+  applyAi(testedKey: string | undefined): void;
+  /** True while MERA_POD_AI_API_KEY is set, which replaces the saved AI key. */
+  aiKeyFromEnv: boolean;
 }
 
 export interface Pod {
@@ -95,6 +104,7 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
   const log = (level: Level, line: string) => write(level, guards.redact(line));
 
   // 1. The lock: one pod per home.
+  const realFetch = globalThis.fetch;
   guards.installGlobalFetch();
   const lock = guards.acquireLock();
   const cleanups: (() => unknown)[] = [() => lock.release()];
@@ -121,34 +131,11 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
     registerPlatform(host as never);
 
     // 6. Load the client for real, seed, apply the saved control state, run.
-    const { createOpenAiTransport } = require('mera-news-client/dist/lib/llm/openai-transport') as {
-      createOpenAiTransport(config: Record<string, unknown>): { inFlight(): number };
-    };
+    const { createOpenAiTransport } = require('mera-news-client/dist/lib/llm/openai-transport') as { createOpenAiTransport: CreateOpenAiTransport };
     // The transport for the AI service in pod.json, or, with none, one that refuses every call.
-    if (cfg.ai) {
-      (host as Record<string, unknown>).llmTransport = createOpenAiTransport({
-        baseUrl: cfg.ai.baseUrl,
-        apiKey: cfg.ai.apiKey,
-        model: cfg.ai.model,
-        concurrency: cfg.ai.concurrency,
-        callTimeoutMs: cfg.ai.callTimeoutMs,
-        harnessFolder: harness ? 'user' : undefined,
-        quirks: cfg.ai.quirks,
-        reasoning: reasoningFor(cfg.ai.origin, cfg.ai.model),
-      });
-    } else {
-      // Without a transport the client falls back to Mera's gateway, so this one refuses every call at once.
-      const err = Object.assign(new Error('No AI service is set in pod.json.'), { code: 'no_ai_service' });
-      (host as Record<string, unknown>).llmTransport = {
-        complete: () => Promise.reject(err),
-        batch: () => Promise.reject(err),
-        // eslint-disable-next-line require-yield
-        async *chat() {
-          throw err;
-        },
-        asyncJobs: false,
-      };
-    }
+    const llm = switchingTransport();
+    if (cfg.ai) llm.use(aiTransport(createOpenAiTransport, cfg.ai, !!harness));
+    (host as Record<string, unknown>).llmTransport = llm.transport;
     require('mera-news-client/dist/lib/database/index');
     require('mera-news-client/dist/lib/scheduler/tasks/data-cleanup-task');
     require('mera-news-client/dist/lib/scheduler/tasks/feed-sync-task');
@@ -169,9 +156,18 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
     const control = createControl(cfg, env);
     control.apply();
     initNetworkListener();
+    // Started once, after the stores hydrate, and only with an AI service: at boot or when one is set.
+    let hydrated = false;
+    let queueStarted = false;
+    const startQueue = () => {
+      if (!hydrated || queueStarted || !cfg.ai) return;
+      queueStarted = true;
+      void inferenceQueue.start().catch((e) => log('error', `The inference queue did not start: ${(e as Error).message}`));
+    };
     const stopClient = startClient({
       afterHydrate: () => {
-        if (cfg.ai) void inferenceQueue.start().catch((e) => log('error', `The inference queue did not start: ${(e as Error).message}`));
+        hydrated = true;
+        startQueue();
       },
     });
     cleanups.push(async () => {
@@ -192,7 +188,37 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
     const everyMs = Number(env.MERA_POD_INTERVAL_SECONDS) * 1000 || undefined;
     guards.appState.startCycle(everyMs, () => control.get().paused);
     cleanups.push(() => guards.appState.stop());
-    const made = options.createServices?.({ cfg, control, log, keyRefused: (server) => guards.refusedBy(server === 'ai' ? (cfg.ai?.origin ?? '') : cfg.dataServer.origin) });
+    // Builds the new transport first, so a failure there changes nothing; then lets the log blank the
+    // key and the fetch reach the address before any call can go there, and only then switches.
+    const applyAi = (testedKey: string | undefined) => {
+      const next = loadConfig(cfg.paths.home, env).ai;
+      if (!next) throw new Error('pod.json has no AI service');
+      if (next.apiKey !== testedKey) throw new Error('the key the pod would use is not the key that was tested');
+      const target = aiTransport(createOpenAiTransport, next, !!harness);
+      const before = { ai: cfg.ai, target: llm.current() };
+      guards.allowAi(next);
+      llm.use(target);
+      cfg.ai = next;
+      try {
+        control.apply();
+        startQueue();
+      } catch (error) {
+        guards.allowAi(before.ai);
+        llm.use(before.target);
+        cfg.ai = before.ai;
+        control.apply();
+        throw error;
+      }
+    };
+    const made = options.createServices?.({
+      cfg,
+      control,
+      log,
+      keyRefused: (server) => guards.refusedBy(server === 'ai' ? (cfg.ai?.origin ?? '') : cfg.dataServer.origin),
+      aiFetch: realFetch,
+      applyAi,
+      aiKeyFromEnv: !!env.MERA_POD_AI_API_KEY,
+    });
     if (made?.stop) cleanups.push(() => made.stop!());
     const plugins = await loadPlugins(cfg, {
       services: made?.services ?? unavailableServices,

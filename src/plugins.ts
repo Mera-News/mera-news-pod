@@ -3,6 +3,7 @@
 // speaks this contract version, and that it starts.
 import fs from 'node:fs';
 import path from 'node:path';
+import { AI_PROVIDERS } from './ai-providers';
 import type { LoadedConfig } from './config';
 import { POD_API, POD_API_VERSIONS, type CreatePlugin, type PluginContext, type PodApiVersion, type Logger, type PodPlugin, type PodServices } from './plugin-api';
 
@@ -16,7 +17,7 @@ export const unavailableServices: PodServices = {
   profile: { get: unavailable, addFacts: unavailable, removeFacts: unavailable, editTopics: unavailable, addTopics: unavailable },
   suggestions: { get: unavailable },
   reading: { status: unavailable, set: unavailable, readNow: unavailable },
-  aiService: { set: unavailable },
+  aiService: { set: unavailable, models: unavailable, providers: () => AI_PROVIDERS, setReasons: unavailable },
   stories: { forProfile: unavailable, judge: unavailable },
   commands: { run: unavailable },
   model: { chatCompletions: unavailable },

@@ -73,6 +73,8 @@ export interface Snapshot {
   dataKeyRefused: boolean;
   /** Where an unreadable pick history was moved at start. */
   picksSetAside?: string;
+  /** False while the pod writes no reason for a pick. */
+  reasons?: boolean;
 }
 
 // Addressed to the person's own assistant, which does the picking when no AI service is set.
@@ -130,7 +132,7 @@ export function problemsOf(s: Snapshot): PodProblem[] {
     problems.push({
       code: 'ai_key_refused',
       who: 'person',
-      fix: 'The AI service refuses the pod\'s key, so nothing can be rated. Set aiApiKey in secrets.json (or MERA_POD_AI_API_KEY), then restart the pod. Or remove the ai block from pod.json and let your assistant pick.',
+      fix: 'The AI service refuses the pod\'s key, so nothing can be rated. Enter a working key in the pod\'s AI service settings, or set aiApiKey in secrets.json (or MERA_POD_AI_API_KEY) and restart the pod. Or remove the ai block from pod.json and let your assistant pick.',
     });
   }
   if (s.dataKeyRefused) problems.push(dataKeyRefused);
@@ -225,7 +227,7 @@ export function buildStatus(cfg: LoadedConfig, control: Control, s: Snapshot, pi
         : []),
     ],
     limits: server.limits,
-    ai: cfg.ai ? { host: new URL(cfg.ai.baseUrl).host, model: cfg.ai.model } : null,
+    ai: cfg.ai ? { host: new URL(cfg.ai.baseUrl).host, model: cfg.ai.model, relevanceModel: cfg.ai.relevanceModel, reasons: s.reasons !== false } : null,
     dataServer: { host: new URL(cfg.dataServer.graphqlUrl).host },
   };
 }

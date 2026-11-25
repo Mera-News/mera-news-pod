@@ -1,12 +1,13 @@
 // The one fetch the client uses. It reaches only the origins the config names, and it never
 // follows a redirect, so a server cannot send the pod somewhere it was not told to go.
 export function guardedFetch(
-  allowedOrigins: readonly string[],
+  /** A Set is read at every request, so the pod can change it while it runs. */
+  allowedOrigins: readonly string[] | ReadonlySet<string>,
   log: (line: string) => void = console.error,
   /** Told the status of every answer, so the pod can say when a server keeps refusing its key. */
   onStatus: (origin: string, status: number) => void = () => {},
 ): typeof globalThis.fetch {
-  const allowed = new Set(allowedOrigins);
+  const allowed = allowedOrigins instanceof Set ? allowedOrigins : new Set(allowedOrigins);
   const reported = new Set<string>();
   // Taken now, so installing the guard as the global fetch cannot make it call itself.
   const real = globalThis.fetch;

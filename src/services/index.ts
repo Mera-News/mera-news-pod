@@ -6,7 +6,7 @@ import { createNotifier, NOTIFY_LEVELS } from '../notify';
 import type { PickView, PodServices } from '../plugin-api';
 import { createDisplayService } from './display';
 import { createEvents } from './events';
-import { createAiService } from './ai-service';
+import { createAiService, reasonsOn } from './ai-service';
 import { createCommands } from './commands';
 import { createLedger, PodError } from './ledger';
 import { readFeed } from './picks';
@@ -22,7 +22,14 @@ export { PodError } from './ledger';
 
 export function createServices(context: ServicesContext): { services: PodServices; stop(): void } {
   const { cfg, control, log } = context;
-  const snapshotInputs = { keyRefused: context.keyRefused, noAi: !cfg.ai, picksSetAside: undefined as string | undefined };
+  // noAi is read at every snapshot: an AI service can be set while the pod runs.
+  const snapshotInputs = {
+    keyRefused: context.keyRefused,
+    get noAi() {
+      return !cfg.ai;
+    },
+    picksSetAside: undefined as string | undefined,
+  };
   const baseLedger = createLedger(cfg.paths.picksFile);
   snapshotInputs.picksSetAside = baseLedger.setAside;
   const changes = createEvents((line) => log('warning', line));
@@ -42,7 +49,7 @@ export function createServices(context: ServicesContext): { services: PodService
   const running = !!notifier || appNotify;
   // Asked once, in the background: a plugin that needs it waits for the answer.
   const dataServer = fetchLimits(cfg);
-  const profile = createProfile(() => dataServer, !!cfg.ai);
+  const profile = createProfile(() => dataServer, () => !!cfg.ai);
   const news = createNewsService(cfg);
   // Before the first read of the Feed: a story the assistant left out is never a pick.
   const stories = createStories({ news, profile, file: cfg.paths.verdictsFile, onChange: changes.poke });
@@ -95,9 +102,16 @@ export function createServices(context: ServicesContext): { services: PodService
 
   // Served while reading is paused: it only reads what is already stored.
   const display = createDisplayService();
-  const ai = createAiService(cfg.paths);
   const services: PodServices = {
-    aiService: ai.service,
+    aiService: createAiService({
+      paths: cfg.paths,
+      fetch: context.aiFetch,
+      apply: context.applyAi,
+      keyFromEnv: context.aiKeyFromEnv,
+      hasAi: () => !!cfg.ai,
+      readNow: () => services.reading.readNow(),
+      log,
+    }),
     commands: createCommands(log, display),
     profile,
     // Chat is the person's own action, so it is served while reading is paused.
@@ -141,8 +155,7 @@ export function createServices(context: ServicesContext): { services: PodService
       },
       async status() {
         const [snapshot, picks, known, setup] = await Promise.all([takeSnapshot(snapshotInputs), feed(), dataServer, readSetup(!!cfg.ai)]);
-        const saved = ai.saved();
-        return { ...buildStatus(cfg, control, snapshot, picks.length, known), ...(saved ? { aiAfterRestart: saved } : {}), ...(setup.complete ? {} : { setup }) };
+        return { ...buildStatus(cfg, control, { ...snapshot, reasons: reasonsOn() }, picks.length, known), ...(setup.complete ? {} : { setup }) };
       },
       async set(change) {
         if (change.paused !== undefined) control.setPaused(change.paused);

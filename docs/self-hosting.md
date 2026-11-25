@@ -35,7 +35,7 @@ Edit `pod.json`:
 ```json
 {
   "dataServer": { "url": "http://127.0.0.1:3002" },
-  "ai": { "baseUrl": "http://127.0.0.1:11434/v1", "model": "your-model-name" },
+  "ai": { "baseUrl": "http://127.0.0.1:11434/v1", "model": "your-model-name", "relevanceModel": "your-smaller-model" },
   "reading": { "everyMinutes": 15 },
   "language": "en",
   "region": "NL",
@@ -48,7 +48,8 @@ Edit `pod.json`:
 |---|---|
 | `dataServer.url` | The data server. `/graphql` is added when missing. |
 | `ai.baseUrl`, `ai.model` | The AI service and the model it should use. Both are needed for picks made while you are away; leave the whole `ai` block out and your assistant picks when you ask. |
-| `ai.concurrency` | Requests in flight at once, 1 to 16. Default 2. |
+| `ai.relevanceModel` | The model that rates each article for you, many times per read, so a smaller, cheaper one fits. Default: `ai.model`. |
+| `ai.concurrency` | Requests in flight at once, 1 to 16, for each model. Default 2. |
 | `ai.callTimeoutSeconds` | How long one request may take, 10 to 3600. Default 300. |
 | `reading.everyMinutes` | How often the pod reads, 5 to 1440. Default 15. |
 | `reading.runTimeoutMinutes` | How long one read may take, 1 to 240. Default 30. |
@@ -62,7 +63,7 @@ Keys go in `secrets.json`, which must not be readable by other users (`chmod 600
 { "aiApiKey": "...", "dataApiKey": "..." }
 ```
 
-`dataApiKey` is the data server's `MERA_NEWS_API_KEY`; leave it out for the one-computer setup. `MERA_POD_AI_API_KEY` and `MERA_POD_DATA_API_KEY` override them. Leave `aiApiKey` out when your AI service needs none.
+`dataApiKey` is the data server's `MERA_NEWS_API_KEY`; leave it out for the one-computer setup. `MERA_POD_AI_API_KEY` and `MERA_POD_DATA_API_KEY` override them. Leave `aiApiKey` out when your AI service needs none. While `MERA_POD_AI_API_KEY` is set, the AI service cannot be set from a plugin or the website.
 
 The settings are read when the pod starts. After an edit, restart it.
 
@@ -79,7 +80,7 @@ The pod also says what is wrong while it runs. Ask your assistant for the status
 
 | Problem | What to do |
 |---|---|
-| `ai_key_refused` | The AI service refuses the key. Set `aiApiKey` and restart, or remove the `ai` block and let your assistant pick. |
+| `ai_key_refused` | The AI service refuses the key. Enter a working key in the AI service settings, or set `aiApiKey` and restart, or remove the `ai` block and let your assistant pick. |
 | `data_key_refused` | The data server refuses the key. Set `dataApiKey`, restart. |
 | `read_failing` | The last read failed. Check that both servers run, then run `check`. |
 | `picks_history_reset` | The pick list could not be read. It was moved to `data/picks.json.unreadable` and some picks may arrive a second time. |

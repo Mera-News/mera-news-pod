@@ -23,6 +23,7 @@ const MODULES = {
   'scheduler/AppScheduler': () => require('mera-news-client/dist/lib/scheduler/AppScheduler'),
   'scheduler/scheduler-store': () => require('mera-news-client/dist/lib/scheduler/scheduler-store'),
   'stores/feed-list-selector': () => require('mera-news-client/dist/lib/stores/feed-list-selector'),
+  'stores/mera-protocol-store': () => require('mera-news-client/dist/lib/stores/mera-protocol-store'),
   'sync/command': () => require('mera-news-client/dist/lib/sync/command'),
   'sync/commands': () => require('mera-news-client/dist/lib/sync/commands'),
   'sync/snapshot': () => require('mera-news-client/dist/lib/sync/snapshot'),

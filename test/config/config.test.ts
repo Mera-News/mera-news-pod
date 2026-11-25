@@ -99,3 +99,8 @@ test('an endpoint that refuses sampling settings gets the no-sampling quirk, and
   assert.deepEqual(anthropic.ai!.quirks, ['no-sampling']);
   assert.deepEqual(loadConfig(home(minimal), {}).ai!.quirks, []);
 });
+
+test('ai.relevanceModel rates articles and defaults to ai.model', () => {
+  assert.equal(loadConfig(home(minimal), {}).ai!.relevanceModel, 'qwen3:8b');
+  assert.equal(loadConfig(home({ ...minimal, ai: { ...minimal.ai, relevanceModel: 'small' } }), {}).ai!.relevanceModel, 'small');
+});

@@ -72,8 +72,8 @@ export function cleanTopicTexts(texts: unknown): string[] {
   });
 }
 
-/** `hasAi`: the pod makes its own topics too, which a reply to `addTopics` says. */
-export function createProfile(server: () => Promise<DataServerInfo>, hasAi: boolean): PodServices['profile'] {
+/** `hasAi`: the pod makes its own topics too, which a reply to `addTopics` says. Asked at every call. */
+export function createProfile(server: () => Promise<DataServerInfo>, hasAi: () => boolean): PodServices['profile'] {
   const byCreated = (a: Fact, b: Fact) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
 
   return {
@@ -94,7 +94,7 @@ export function createProfile(server: () => Promise<DataServerInfo>, hasAi: bool
           ...(reviewedAt(fact) ? { reviewedAt: reviewedAt(fact) } : {}),
         });
       }
-      return { facts: views, ...(offset + PAGE < all.length ? { nextOffset: offset + PAGE } : {}), setup: await readSetup(hasAi, all) };
+      return { facts: views, ...(offset + PAGE < all.length ? { nextOffset: offset + PAGE } : {}), setup: await readSetup(hasAi(), all) };
     },
 
     async addFacts(statements) {
@@ -190,7 +190,7 @@ export function createProfile(server: () => Promise<DataServerInfo>, hasAi: bool
       // Writes the topics as the pod's own generator does and marks the fact's topics done.
       const minted = fresh.length ? await completeTopicGeneration(factId, fresh) : [];
       const result: AddTopicsResult = { added: minted.map((t) => ({ id: t.id, text: t.text })), skipped };
-      if (hasAi) result.note = 'This pod also makes its own topics for each fact, so more may appear.';
+      if (hasAi()) result.note = 'This pod also makes its own topics for each fact, so more may appear.';
       return result;
     },
 

@@ -19,7 +19,7 @@ export interface PluginEntry {
 export interface PodConfigFile {
   dataServer: { url: string };
   /** Left out, the pod serves news and runs no AI work. */
-  ai?: { baseUrl: string; model: string; concurrency?: number; callTimeoutSeconds?: number };
+  ai?: { baseUrl: string; model: string; relevanceModel?: string; concurrency?: number; callTimeoutSeconds?: number };
   reading?: { everyMinutes?: number; runTimeoutMinutes?: number };
   language?: string;
   region?: string;
@@ -55,7 +55,18 @@ export interface LoadedConfig {
   paths: PodPaths;
   dataServer: { graphqlUrl: string; origin: string; apiKey?: string };
   /** Null when pod.json has no ai block: the pod serves news and runs no AI work. */
-  ai: { baseUrl: string; origin: string; model: string; apiKey?: string; concurrency: number; callTimeoutMs: number; quirks: string[] } | null;
+  ai: {
+    baseUrl: string;
+    origin: string;
+    /** Chat, topics and every other call. */
+    model: string;
+    /** Rates articles; pod.json's ai.relevanceModel, else `model`. */
+    relevanceModel: string;
+    apiKey?: string;
+    concurrency: number;
+    callTimeoutMs: number;
+    quirks: string[];
+  } | null;
   reading: { everyMinutes: number; runTimeoutMs: number };
   language?: string;
   region?: string;
@@ -186,6 +197,7 @@ export function loadConfig(home: string, env: NodeJS.ProcessEnv = process.env): 
             origin: ai.origin,
             quirks: endpointQuirks(ai.origin),
             model: aiFile.model,
+            relevanceModel: aiFile.relevanceModel || aiFile.model,
             apiKey: aiApiKey,
             concurrency: whole(aiFile.concurrency, 2, 1, 16, 'ai.concurrency'),
             callTimeoutMs: whole(aiFile.callTimeoutSeconds, 300, 10, 3600, 'ai.callTimeoutSeconds') * 1000,

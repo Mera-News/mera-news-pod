@@ -9,9 +9,9 @@ export type Sink = (level: Level, line: string) => void;
 export const consoleSink: Sink = (level, line) => (RANK[level] >= RANK.warning ? console.error(line) : console.log(line));
 
 /** A literal replace of each secret value, so a key never reaches a log in any form it was given. */
+/** Read at every call, so a secret added to the list later is blanked from then on. */
 export function createRedactor(secrets: readonly string[]): (text: string) => string {
-  const values = secrets.filter((s) => s.length > 0);
-  return (text) => values.reduce((out, secret) => out.split(secret).join('[redacted]'), text);
+  return (text) => secrets.reduce((out, secret) => (secret ? out.split(secret).join('[redacted]') : out), text);
 }
 
 function describe(value: unknown): string {

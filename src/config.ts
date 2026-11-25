@@ -4,6 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+
+/** Request changes an endpoint needs whatever the model: Anthropic refuses temperature and top_p (a 400). */
+const ENDPOINT_QUIRKS: Record<string, string[]> = { 'https://api.anthropic.com': ['no-sampling'] };
+
 export class ConfigError extends Error {}
 
 export interface PluginEntry {
@@ -53,7 +57,7 @@ export interface LoadedConfig {
   paths: PodPaths;
   dataServer: { graphqlUrl: string; origin: string; apiKey?: string };
   /** Null when pod.json has no ai block: the pod serves news and runs no AI work. */
-  ai: { baseUrl: string; origin: string; model: string; apiKey?: string; concurrency: number; callTimeoutMs: number } | null;
+  ai: { baseUrl: string; origin: string; model: string; apiKey?: string; concurrency: number; callTimeoutMs: number; quirks: string[] } | null;
   reading: { everyMinutes: number; runTimeoutMs: number };
   language?: string;
   region?: string;
@@ -179,8 +183,10 @@ export function loadConfig(home: string, env: NodeJS.ProcessEnv = process.env): 
     ai:
       ai && aiFile
         ? {
-            baseUrl: ai.href.replace(/\/+$/, ''),
+            // The address that holds /chat/completions, also when the full request address was pasted.
+            baseUrl: ai.href.replace(/\/+$/, '').replace(/\/chat\/completions$/, ''),
             origin: ai.origin,
+            quirks: ENDPOINT_QUIRKS[ai.origin] ?? [],
             model: aiFile.model,
             apiKey: aiApiKey,
             concurrency: whole(aiFile.concurrency, 2, 1, 16, 'ai.concurrency'),

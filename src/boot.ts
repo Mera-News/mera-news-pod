@@ -132,6 +132,7 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
         concurrency: cfg.ai.concurrency,
         callTimeoutMs: cfg.ai.callTimeoutMs,
         harnessFolder: harness ? 'user' : undefined,
+        quirks: cfg.ai.quirks,
       });
     } else {
       // Without a transport the client falls back to Mera's gateway, so this one refuses every call at once.

@@ -19,6 +19,7 @@ export function createModelService(cfg: LoadedConfig, fetchFn: typeof fetch = gl
       if (!ai) throw new PodError('no_ai_service', 'No AI service is set.', 'set ai.baseUrl and ai.model in pod.json and restart the pod');
       const sent: Record<string, unknown> = { model: ai.model };
       for (const field of PASSED) if (asked[field] !== undefined) sent[field] = asked[field];
+      if (ai.quirks.includes('no-sampling')) delete sent.temperature, delete sent.top_p;
       return fetchFn(`${ai.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {}) },

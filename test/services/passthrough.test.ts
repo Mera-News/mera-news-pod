@@ -33,7 +33,7 @@ after(() => servers.forEach((s) => (s.closeAllConnections(), s.close())));
 const MODEL_KEY = 'ai-key-secret';
 const DATA_KEY = 'data-key-secret';
 const cfgFor = (aiBase: string, graphqlUrl: string) =>
-  ({ ai: { baseUrl: aiBase, model: 'configured-model', apiKey: MODEL_KEY }, dataServer: { graphqlUrl, apiKey: DATA_KEY } }) as unknown as LoadedConfig;
+  ({ ai: { baseUrl: aiBase, model: 'configured-model', apiKey: MODEL_KEY, quirks: [] }, dataServer: { graphqlUrl, apiKey: DATA_KEY } }) as unknown as LoadedConfig;
 const only = (...urls: string[]) => guardedFetch(urls.map((u) => new URL(u).origin), () => {});
 const json = (res: http.ServerResponse, body: unknown) => (res.writeHead(200, { 'content-type': 'application/json' }), res.end(JSON.stringify(body)));
 
@@ -53,6 +53,15 @@ test('the model request goes to the configured endpoint with the configured mode
   assert.equal(got.body.model, 'configured-model');
   assert.equal(got.headers.authorization, `Bearer ${MODEL_KEY}`);
   assert.deepEqual(Object.keys(got.body).sort(), ['messages', 'model', 'stream', 'temperature']);
+});
+
+test('an endpoint with the no-sampling quirk never gets temperature or top_p', async () => {
+  const up = await serve((_q, res) => json(res, { ok: true }));
+  const cfg = cfgFor(`${up.origin}/v1`, `${up.origin}/graphql`);
+  cfg.ai!.quirks = ['no-sampling'];
+  const model = createModelService(cfg, only(up.origin));
+  await model.chatCompletions({ messages: [{ role: 'user', content: 'hi' }], temperature: 0.2, top_p: 0.9, max_tokens: 50 }, new AbortController().signal);
+  assert.deepEqual(Object.keys(up.seen[0].body).sort(), ['max_tokens', 'messages', 'model']);
 });
 
 test('nothing from the caller is forwarded as a header', async () => {

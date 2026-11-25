@@ -92,3 +92,10 @@ test('notify.meraNewsApp off when absent, disabled, or wakeRelay alone is set', 
   assert.equal(old.wakeRelay, undefined);
   assert.equal((old.notify as { meraNewsApp?: unknown }).meraNewsApp, undefined);
 });
+
+test("Anthropic's address gets the no-sampling quirk, and a pasted /chat/completions is taken off the address", () => {
+  const anthropic = loadConfig(home({ ...minimal, ai: { baseUrl: 'https://api.anthropic.com/v1/chat/completions', model: 'claude-sonnet-5-5' } }), {});
+  assert.equal(anthropic.ai!.baseUrl, 'https://api.anthropic.com/v1');
+  assert.deepEqual(anthropic.ai!.quirks, ['no-sampling']);
+  assert.deepEqual(loadConfig(home(minimal), {}).ai!.quirks, []);
+});

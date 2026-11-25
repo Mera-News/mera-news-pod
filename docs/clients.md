@@ -1,5 +1,46 @@
 # Connecting a client
 
+## Which AI apps work
+
+| App | State | How |
+|---|---|---|
+| Claude Desktop (Chat tab) | Tested by Mera Labs | The Mera News extension, below |
+| Claude Code | Tested by Mera Labs | The Mera News plugin, below |
+| ChatGPT | Not supported | It needs a public HTTPS connector with OAuth. The pod runs on your computer with a token, so there is no easy way today. |
+| Grok | Built, not tested by Mera Labs | `.grok-plugin/plugin.json` in the plugin folder |
+| Codex and apps that read OpenAI's plugin format | Built, not tested by Mera Labs | `plugin.json` and `.agents/plugins/marketplace.json` |
+| OpenClaw | Built, not tested by Mera Labs | The Claude plugin from the same marketplace |
+| Any other MCP client | Works with the token | The stdio bridge or Streamable HTTP, below |
+
+If you try one of the untested apps, open an issue in [mera-news-pod-plugins](https://github.com/Mera-News/mera-news-pod-plugins/issues) with what you find.
+
+## The Mera News plugin
+
+The plugin is the pod, the MCP plugin and the website in one program that your AI app starts and stops. It needs no clone and no terminal. It writes `~/.mera-news-pod/pod.json` on its first run, pointed at Mera News (`https://api.mera.news`), and connects to a pod already running for that folder instead of starting another. The pod runs while the app is open, unless you turn on Keep running (see [running your own pod](self-hosting.md#from-the-mera-news-plugin-on-macos)).
+
+- **Claude Desktop on macOS:** download `mera-news.mcpb` from the [plugins' latest release](https://github.com/Mera-News/mera-news-pod-plugins/releases/latest) and open it. Claude Desktop shows an install dialog. It asks for your Mera News key, which it keeps in the system's secure store, and whether to run the Mera News website (on by default). Ask Mera Labs for a key: message Mera on WhatsApp or write to contact@mera.news. Never paste the key into a chat. The tools work in the Chat tab.
+- **Claude Code:** `/plugin marketplace add Mera-News/mera-news-pod-plugins`, then `/plugin install mera-news@mera-news`. The repository's `.claude-plugin/marketplace.json` lists the plugin. It asks for the key.
+- **Grok, Codex, OpenClaw:** add `Mera-News/mera-news-pod-plugins` as a marketplace in the app, then install `mera-news`. Put the key in `~/.mera-news-pod/secrets.json` as `{ "dataApiKey": "<your key>" }`, then run `chmod 600 ~/.mera-news-pod/secrets.json`; the pod refuses the file otherwise. These follow each app's published plugin format and are not tested by Mera Labs.
+
+Your assistant adds facts as you talk to it, and asks you to confirm each one before it saves it. The website has no box for adding a fact; you review each fact's topics on its You tab.
+
+## The Mera News website
+
+The website is how you see your news. The MCP plugin only hands data to your assistant. The website runs inside the pod on `127.0.0.1`. Ask your assistant to "open Mera News" (the `open_news_site` tool gives a link that works once, for 10 minutes), or run `npx mera-news-pod-web link` in the `mera-news-pod-plugins` folder.
+
+- **Feed:** one lane per fact, each loading and scrolling on its own. It shows the picks and the stories left out, each with its reason and level, and the totals at the top.
+- **World:** the top stories by country, each with its full coverage.
+- **Following:** the stories you follow and their timelines.
+- **You:** your facts and their topics, your digest times, the AI service, Mera News on this computer, Appearance (light, dark or system), Keep running, Your phone, and Sign out.
+
+A headline opens the article page with the story's other reports. Read on the publisher's site from there. Every headline shows in English, marked as translated when it is, with the original under it. Open tabs stay signed in when the pod restarts; Sign out on You ends every one.
+
+**On your phone:** reach the same website through [Tailscale](https://tailscale.com) (`tailscale serve`) or another HTTPS tunnel, and pair the phone with the QR code under You > Your phone. The website itself listens on `127.0.0.1` only. A phone cannot change the AI service.
+
+**Your digest:** tell your assistant when you want your news, any number of times a day. Two or three suit most people. A digest missed while the app was closed runs once when it opens.
+
+## A pod you run yourself
+
 The pod serves an MCP client through the `mcp` plugin, which lives in the `mera-news-pod-plugins` repository, in `packages/mcp`. Build it once:
 
 ```
@@ -18,6 +59,8 @@ Then name it in `pod.json`, by the path of the package:
 ```
 
 Restart the pod. `node build/cli.js check` prints the plugin's address. Plugins run inside the pod with its full access to your profile, so only run ones you trust.
+
+For the website, add `packages/web` from the same checkout the same way, after `mcp`. Then `npx mera-news-pod-web link` prints a link that opens it in one browser tab and works once, for 10 minutes. Add `--home <folder>` when the pod does not use the default home.
 
 ## Plugin settings
 
@@ -41,7 +84,7 @@ Every request needs a token. The pod never prints it. It is in `~/.mera-news-pod
 
 ## Which setups have been run
 
-The pod's own tests drive the plugin with an MCP client over Streamable HTTP and the bearer token, the way the Claude Code setup below connects, and run the stdio bridge against a test server. A client with the right token connects and lists the tools; a missing or wrong token gets 401. A generic MCP client has also used a running pod the same way: it started a session, listed the tools and called them, and without the token it got 401. The named clients below follow each client's current documentation; Claude Code, Claude Desktop and claude.ai themselves have not been run against a pod yet.
+Mera Labs runs the Mera News extension in Claude Desktop's Chat tab and the plugin in Claude Code. The pod's own tests drive the MCP plugin with an MCP client over Streamable HTTP and the bearer token, the way the Claude Code setup below connects, and run the stdio bridge against a test server. A client with the right token connects and lists the tools; a missing or wrong token gets 401. The hand setups below follow each client's current documentation; the claude.ai connector has not been run against a pod yet.
 
 ## Claude Code
 
@@ -65,15 +108,6 @@ Or in `.mcp.json`, which Claude Code expands `${MERA_POD_TOKEN}` in:
 
 with `MERA_POD_TOKEN` set to the token.
 
-## The Mera News plugin
-
-The plugin is the pod and the MCP plugin in one program that your AI app starts and stops. It needs no clone and no terminal. It writes `~/.mera-news-pod/pod.json` on its first run, pointed at Mera News (`https://api.mera.news`), and connects to a pod already running for that folder instead of starting another.
-
-- **Claude Desktop:** download `mera-news.mcpb` from the [plugins' latest release](https://github.com/Mera-News/mera-news-pod-plugins/releases) and open it. Claude Desktop asks for your Mera News key and keeps it in the system's secure store.
-- **Claude Code:** `/plugin marketplace add Mera-News/mera-news-pod-plugins`, then `/plugin install mera-news@mera-news`. It asks for the key.
-- **Grok Build, Codex, OpenClaw:** add `Mera-News/mera-news-pod-plugins` as a marketplace in the app, then install `mera-news`. Put the key in `~/.mera-news-pod/secrets.json` as `{ "dataApiKey": "<your key>" }`. These follow each app's published plugin format and are tested by the community.
-
-The sections below connect a pod you run yourself.
 
 ## Claude Desktop, pod on the same machine
 
@@ -126,6 +160,6 @@ It looks like `https://pod.example.com/mcp/<token>`. Anyone who holds that addre
 
 ## What the assistant can do
 
-`get_profile`, `add_facts`, `remove_facts`, `edit_topics`, `get_suggestions`, `search_news`, `latest_news`, `get_status` and `set_reading`. `search_news` and `latest_news` read the stored news directly, so they work without an AI service and without waiting for picks. Without an AI service the pod makes no picks of its own: ask your assistant for the news, and it picks from your profile with these tools. There are also two prompts: `set_up_profile`, which interviews you and saves the answers as facts, and `daily_digest`, which shows new picks by level.
+`get_profile`, `add_facts`, `remove_facts`, `edit_topics`, `get_suggestions`, `news_for_profile`, `rate_stories`, `top_stories`, `search_news`, `latest_news`, `get_status`, `set_reading`, `digest_done` and `open_news_site`. `search_news` and `latest_news` read the stored news directly, so they work without an AI service and without waiting for picks. Without an AI service the pod makes no picks of its own: your assistant writes the topics for each fact, reads `news_for_profile` and saves a verdict on each story with `rate_stories`. Its picks reach the website and your notifications like the pod's own. There are also two prompts: `set_up_profile`, which interviews you and saves the answers as facts, and `daily_digest`, which shows new picks by level.
 
 A pick is a headline, a link out and a one-line reason. The pod never returns a summary or the article text. The server asks your AI app to send you to the publisher's site to read each article, and never to fetch, copy or summarise it there, since that may breach the publisher's copyright.

@@ -2,6 +2,8 @@
 
 The pod keeps your news profile on your machine, reads the news on a schedule and keeps the stories that matter to you, each with a one-line reason. You reach it through a plugin, see [clients](clients.md).
 
+For one person, the simplest pod is the Mera News extension for Claude Desktop, or the plugin for Claude Code: it runs the pod, the MCP plugin and the website with nothing to install by hand, against Mera News's data server with a key from Mera Labs. See [the Mera News plugin](clients.md#the-mera-news-plugin). This guide is for a pod you install and run yourself, and for running everything yourself, the data server included.
+
 It needs Node 22.13 or newer (Node 24 also runs the one-computer news store), a Mera News data server, and, for picks made while you are away, an AI service with an OpenAI-compatible API. The AI service can run on your own machine. Without one, your assistant picks the news for you when you ask.
 
 ## Choose where the news comes from
@@ -10,7 +12,7 @@ It needs Node 22.13 or newer (Node 24 also runs the one-computer news store), a 
 - **On this computer**: the data server's [one-computer setup](https://github.com/Mera-News/mera-news-data-server/blob/main/docs/self-host.md#the-one-computer-setup), one SQLite file with no account, no Docker and no key. It is meant for 10 to 20 feeds. Run `mera-news-local serve`, set `dataServer.url` to `http://127.0.0.1:3002` in `pod.json` below, and leave `dataApiKey` unset.
 - **The server setup**, for more feeds than that: follow [the data server guide](https://github.com/Mera-News/mera-news-data-server/blob/main/docs/self-host.md) through its step 21. The pod needs its search, which the server setup offers only with a key: `NEWS_API_OPEN=false` and `MERA_NEWS_API_KEY` in the data server's `.env`, then the same key as `dataApiKey` in the pod's `secrets.json` and the data server's address as `dataServer.url` in its `pod.json`. Its open mode, without a key, is for trying the data server alone.
 
-Picks the pod makes on its own, while you are away, need an AI service, and they cover articles published in the last 48 hours. Without an AI service, leave `ai` out of `pod.json`: the pod then makes no picks of its own, and when you ask, your assistant picks for you from your profile with the MCP tools `search_news` and `latest_news`. `get_status` says `no_ai_service` and tells the assistant to do that. No AI key is needed for it.
+Picks the pod makes on its own, while you are away, need an AI service, and they cover articles published in the last 48 hours. Without an AI service, leave `ai` out of `pod.json`: the pod then makes no picks of its own, and when you ask, your assistant writes the topics and picks for you from your profile with the MCP tools `news_for_profile` and `rate_stories`, or `search_news` and `latest_news`. `get_status` says `no_ai_service` and tells the assistant to do that. No AI key is needed for it.
 
 ## Install
 
@@ -47,8 +49,8 @@ Edit `pod.json`:
 | Key | Meaning |
 |---|---|
 | `dataServer.url` | The data server. `/graphql` is added when missing. |
-| `ai.baseUrl`, `ai.model` | The AI service and the model it should use. Both are needed for picks made while you are away; leave the whole `ai` block out and your assistant picks when you ask. |
-| `ai.relevanceModel` | The model that rates each article for you, many times per read, so a smaller, cheaper one fits. Default: `ai.model`. |
+| `ai.baseUrl`, `ai.model` | The AI service and the model for chat, your profile and topics. Both are needed for picks made while you are away; leave the whole `ai` block out and your assistant picks when you ask. You can also set the AI service from the website, see [below](#set-the-ai-service-from-the-website). |
+| `ai.relevanceModel` | The model that decides which stories are for you, many times per read, so a smaller, faster one fits. Default: `ai.model`. |
 | `ai.concurrency` | Requests in flight at once, 1 to 16, for each model. Default 2. |
 | `ai.callTimeoutSeconds` | How long one request may take, 10 to 3600. Default 300. |
 | `reading.everyMinutes` | How often the pod reads, 5 to 1440. Default 15. |
@@ -65,7 +67,18 @@ Keys go in `secrets.json`, which must not be readable by other users (`chmod 600
 
 `dataApiKey` is the data server's `MERA_NEWS_API_KEY`; leave it out for the one-computer setup. `MERA_POD_AI_API_KEY` and `MERA_POD_DATA_API_KEY` override them. Leave `aiApiKey` out when your AI service needs none. While `MERA_POD_AI_API_KEY` is set, the AI service cannot be set from a plugin or the website.
 
-The settings are read when the pod starts. After an edit, restart it.
+The settings are read when the pod starts. After an edit, restart it. An AI service set from the website applies at once.
+
+### Set the AI service from the website
+
+With the `web` plugin running (the Mera News plugin runs it for you), open the website and go to You > AI service:
+
+1. Pick a provider from the list, or Other for any service with an OpenAI-compatible API.
+2. Paste the key. It is kept in `secrets.json` on this computer.
+3. Choose a chat model (chat, your profile and topics) and a relevance model (which stories are for you; a smaller, faster model works well), from the provider's own list or by name. Picking a provider fills in suggested models.
+4. Choose whether to write a reason for each story.
+
+Save tests both models first. If one fails, it says why and nothing changes. Once saved, it applies at once, with no restart, and writes `ai.baseUrl` and `ai.model` to `pod.json`, `ai.relevanceModel` when it differs, and the key to `secrets.json`. Only this computer can change the AI service, not a paired phone. It cannot be set this way while `MERA_POD_AI_API_KEY` is set.
 
 ## Check and start
 
@@ -142,7 +155,7 @@ Then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/news.mera.pod.plis
 
 ### From the Mera News plugin, on macOS
 
-The Mera News extension for Claude Desktop and the plugin for Claude Code run the pod only while the app is open. To keep it running after you quit the app, open the Mera News website on your Mac and turn on You > Settings > Keep Mera News running.
+The Mera News extension for Claude Desktop and the plugin for Claude Code run the pod only while the app is open. To keep it running after you quit the app, open the Mera News website on your Mac and turn on You > Keep Mera News running.
 
 - It needs Node.js 22.13 or newer on your Mac, because the app's own Node cannot run without the app. It looks in `/opt/homebrew/bin`, `/usr/local/bin` and your `PATH`. If it finds none, it says so and shows how to get one (`brew install node`, or the installer from nodejs.org). It never installs anything.
 - It writes `~/Library/LaunchAgents/news.mera.pod.plist`, which runs that Node with the plugin's own `server.cjs serve` on the same home folder, at login and again after a crash. Serve mode runs the pod and its plugins, the website included, with nothing on standard output. Its log is `logs/pod.log` in the home folder, started again once it passes 5 MB.
@@ -150,9 +163,10 @@ The Mera News extension for Claude Desktop and the plugin for Claude Code run th
 - While the app runs the pod, the new one waits and takes over within about 10 seconds of the app quitting. From then on, the app only connects to it.
 - Turning it off removes the file and stops the pod a second later. The app starts its own pod again the next time it opens.
 - If an app update removes the `server.cjs` the file names, the next app start points the file at the new one.
+- Updates still arrive through your AI app's extension or plugin install. After one, a pod that keeps running carries on with the old code until it restarts.
 - A `news.mera.pod.plist` you wrote yourself, such as the one above, or one for another home folder, is left as it is, and the setting is not offered.
 
-The pod reads and answers your phone only while the Mac is awake. To keep it awake, change the Mac's energy settings.
+The pod reads and answers your phone (see [the website on your phone](clients.md#the-mera-news-website)) only while the Mac is awake. To keep it awake, change the Mac's energy settings.
 
 ## Notifiers
 

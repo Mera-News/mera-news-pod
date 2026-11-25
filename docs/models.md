@@ -4,7 +4,9 @@ Use any model your AI service offers through an OpenAI-compatible API, hosted or
 
 The prompts are tuned on the models the Mera News app uses. A small local model may fail to follow the reply format, and then reads fail or the picks are poor. If that happens, try a larger model, or change the prompts, see [harness](harness.md).
 
-`node build/cli.js check` tells you whether the model answers and knows the name you gave.
+`node build/cli.js check` tells you whether the model answers and knows the name you gave. On the website, You > AI service tests both models before it saves them, see [running your own pod](self-hosting.md#set-the-ai-service-from-the-website).
+
+The pod uses two models: `ai.model` for chat, your profile and topics, and `ai.relevanceModel` for deciding which stories are for you. The second runs many times per read, so a smaller, faster model works well there.
 
 ## What a read costs
 

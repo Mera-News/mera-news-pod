@@ -1,12 +1,10 @@
 // The pod's home directory, its config file and its secrets, read once at boot. Every error is one
 // plain sentence a person can act on, because `start` and `check` print it as it is.
 import fs from 'node:fs';
+import { endpointQuirks } from './ai-providers';
 import os from 'node:os';
 import path from 'node:path';
 
-
-/** Request changes an endpoint needs whatever the model: this one refuses temperature and top_p with a 400. */
-const ENDPOINT_QUIRKS: Record<string, string[]> = { 'https://api.anthropic.com': ['no-sampling'] };
 
 export class ConfigError extends Error {}
 
@@ -186,7 +184,7 @@ export function loadConfig(home: string, env: NodeJS.ProcessEnv = process.env): 
             // The address that holds /chat/completions, also when the full request address was pasted.
             baseUrl: ai.href.replace(/\/+$/, '').replace(/\/chat\/completions$/, ''),
             origin: ai.origin,
-            quirks: ENDPOINT_QUIRKS[ai.origin] ?? [],
+            quirks: endpointQuirks(ai.origin),
             model: aiFile.model,
             apiKey: aiApiKey,
             concurrency: whole(aiFile.concurrency, 2, 1, 16, 'ai.concurrency'),

@@ -2,6 +2,7 @@
 // from a newer version, and only then load the client, because the client reads its host as it
 // loads and a second pod or a downgraded database must be refused before anything is opened.
 import fs from 'node:fs';
+import { reasoningFor } from './ai-providers';
 import path from 'node:path';
 import { loadConfig, podHome, type LoadedConfig } from './config';
 import { createControl, type Control } from './control';
@@ -133,6 +134,7 @@ export async function boot(options: BootOptions = {}): Promise<Pod> {
         callTimeoutMs: cfg.ai.callTimeoutMs,
         harnessFolder: harness ? 'user' : undefined,
         quirks: cfg.ai.quirks,
+        reasoning: reasoningFor(cfg.ai.origin, cfg.ai.model),
       });
     } else {
       // Without a transport the client falls back to Mera's gateway, so this one refuses every call at once.

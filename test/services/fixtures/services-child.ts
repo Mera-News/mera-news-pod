@@ -141,10 +141,15 @@ async function main() {
           }
         }
         case 'plant': await plantRows(msg.arg); return reply(null);
-        case 'patchRow': {
+        case 'patchRow': { // `table` defaults to article_suggestions; `raw` sets stored columns by their names
           const { default: database } = client<{ default: Db }>('database/index');
-          const row = await database.get('article_suggestions').find(msg.arg.id);
-          await database.write(() => row.update((r: any) => Object.assign(r, msg.arg.patch)));
+          const row = await database.get(msg.arg.table ?? 'article_suggestions').find(msg.arg.id);
+          await database.write(() =>
+            row.update((r: any) => {
+              Object.assign(r, msg.arg.patch);
+              for (const [k, v] of Object.entries(msg.arg.raw ?? {})) r._setRaw(k, v);
+            }),
+          );
           return reply(null);
         }
         case 'rowStatus': {

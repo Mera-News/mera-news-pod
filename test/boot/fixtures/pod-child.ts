@@ -14,6 +14,7 @@ const noServices: PodServices = {
   reading: { status: async () => ({}) as never, set: async () => ({}) as never, readNow: async () => 'ran' },
   aiService: { set: async () => ({ set: true }), models: async () => ({ models: [] }), providers: () => [], setReasons: async () => ({ set: true }) },
   stories: { forProfile: async () => ({}) as never, judge: async () => ({ saved: [], already: [], refused: [] }) },
+  followed: { list: async () => ({ stories: [] }), get: async () => ({}) as never, follow: async () => ({}) as never, unfollow: async () => ({ removed: true }), removeArticle: async () => ({ removed: true }) },
   commands: { run: async () => ({ results: [], snapshot: { schemaVersion: 0, registry: 0, tables: {} } }) },
   display: { snapshot: async () => ({ schemaVersion: 0, registry: 0, tables: {} }), versions: () => ({ schemaVersion: 0, registry: 0 }) },
   events: { on: () => () => {} },

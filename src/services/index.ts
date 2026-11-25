@@ -6,6 +6,7 @@ import { createNotifier, NOTIFY_LEVELS } from '../notify';
 import type { PickView, PodServices } from '../plugin-api';
 import { createDisplayService } from './display';
 import { createEvents } from './events';
+import { createFollowed } from './followed';
 import { createAiService, reasonsOn } from './ai-service';
 import { createCommands } from './commands';
 import { createLedger, PodError } from './ledger';
@@ -119,6 +120,7 @@ export function createServices(context: ServicesContext): { services: PodService
     news,
     // Served while reading is paused, like the news: the assistant or the person asks for it.
     stories: stories.stories,
+    followed: createFollowed({ hasAi: () => !!cfg.ai }),
     display,
     events: changes.events,
 

@@ -24,6 +24,7 @@ const PAGE_DEFAULT = 20;
 const PAGE_MAX = 50;
 /** A run started this recently, for the same topics, is used again instead of asking the server. */
 const REUSE_MS = 60_000;
+/** Runs kept per scope: the whole profile, and each fact. */
 const RUNS_KEPT = 5;
 const RUN_KEPT_MS = 30 * 60_000;
 /** Unjudged stories a run returned are left out of later runs for this long. */
@@ -43,6 +44,8 @@ interface Story {
 }
 interface Run {
   id: string;
+  /** The fact this run covers, or undefined for every fact. */
+  fact?: string;
   at: number;
   signature: string;
   stories: Story[];
@@ -57,6 +60,17 @@ interface Run {
   languages: number;
   /** Stories this run returned unjudged: an earlier page, not an earlier run. */
   marked: Set<string>;
+}
+/** One topic's matches, as the server answered them. */
+interface TopicMatches {
+  ids: string[];
+  storyOf: Map<string, string>;
+  complete: boolean;
+}
+/** A shared answer, so runs for different facts never ask twice for a topic or an article. */
+interface Cached<T> {
+  at: number;
+  p: Promise<T>;
 }
 interface Stored {
   verdict: Verdict;
@@ -166,24 +180,27 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
     return { facts, topics: [...topics.values()] };
   }
 
-  async function startRun(): Promise<Run> {
-    const { facts, topics } = await profileTopics();
-    const signature = JSON.stringify([facts.map((f) => f.id), topics.map((t) => t.text)]);
-    const last = [...runs.values()].at(-1);
-    if (last && last.signature === signature && Date.now() - last.at < REUSE_MS) {
-      // A new caller of the same run: what earlier pages returned now counts as shown before.
-      last.marked.clear();
-      return last;
-    }
+  // Shared by every run: a topic asked for or an article read in the last minute is not asked for
+  // again, whichever fact's run asked first. A run keeps its own articles (articlesById).
+  const topicCache = new Map<string, Cached<TopicMatches>>();
+  const articleCache = new Map<string, Cached<ArticleIn | undefined>>();
+  /** Keeps a cached answer until it fails or is empty, so a failed request or a miss is asked again next time. */
+  function cache<T>(map: Map<string, Cached<T>>, key: string, at: number, p: Promise<T>) {
+    const entry = { at, p };
+    map.set(key, entry);
+    const drop = () => {
+      if (map.get(key) === entry) map.delete(key);
+    };
+    p.then((v) => v === undefined && drop(), drop);
+  }
 
+  async function fetchTopics(texts: string[]): Promise<Map<string, TopicMatches>> {
     type Result = { topicText: string; articleIds: string[]; matchMeta?: { articleId: string; stableClusterId?: string | null }[] | null; hasNextPage?: boolean; nextCursor?: string | null };
-    const ids = new Map<string, string[]>(topics.map((t) => [t.text.toLowerCase(), []]));
-    const storyOf = new Map<string, string>();
-    let asking = topics.map((t) => ({ text: t.text }) as { text: string; afterCursor?: string });
-    let complete = true;
+    const out = new Map<string, TopicMatches>(texts.map((t) => [t.toLowerCase(), { ids: [], storyOf: new Map(), complete: true }]));
+    let asking = texts.map((text) => ({ text }) as { text: string; afterCursor?: string });
     for (let round = 0; asking.length > 0; round++) {
       if (round === MAX_ROUNDS) {
-        complete = false;
+        for (const a of asking) out.get(a.text.toLowerCase())!.complete = false;
         break;
       }
       const next: typeof asking = [];
@@ -191,20 +208,48 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
         const batch = asking.slice(i, i + TOPICS_PER_REQUEST);
         const got = await ask<{ articleIdsForPersona: { topicResults: Result[] } }>('GetArticleIdsForPersona', PERSONA, { query: { limitPerTopic: PER_TOPIC, topics: batch } });
         for (const r of got.articleIdsForPersona.topicResults ?? []) {
-          const list = ids.get(String(r.topicText).toLowerCase());
-          if (!list) continue;
-          for (const id of r.articleIds ?? []) if (typeof id === 'string' && !list.includes(id)) list.push(id);
-          for (const m of r.matchMeta ?? []) if (m?.stableClusterId) storyOf.set(m.articleId, String(m.stableClusterId));
+          const topic = out.get(String(r.topicText).toLowerCase());
+          if (!topic) continue;
+          for (const id of r.articleIds ?? []) if (typeof id === 'string' && !topic.ids.includes(id)) topic.ids.push(id);
+          for (const m of r.matchMeta ?? []) if (m?.stableClusterId) topic.storyOf.set(m.articleId, String(m.stableClusterId));
           if (r.hasNextPage && r.nextCursor) next.push({ text: r.topicText, afterCursor: r.nextCursor });
         }
       }
       asking = next;
     }
+    return out;
+  }
 
+  function topicMatches(texts: string[]): Promise<TopicMatches[]> {
+    const now = Date.now();
+    for (const [k, c] of topicCache) if (now - c.at >= REUSE_MS) topicCache.delete(k);
+    const missing = texts.filter((t) => !topicCache.has(t.toLowerCase()));
+    if (missing.length) {
+      const asked = fetchTopics(missing);
+      for (const t of missing) cache(topicCache, t.toLowerCase(), now, asked.then((m) => m.get(t.toLowerCase())!));
+    }
+    return Promise.all(texts.map((t) => topicCache.get(t.toLowerCase())!.p));
+  }
+
+  async function startRun(fact?: string): Promise<Run> {
+    const all = await profileTopics();
+    const facts = fact === undefined ? all.facts : all.facts.filter((f) => f.id === fact);
+    if (!facts.length && fact !== undefined) throw bad('There is no saved fact with that id.');
+    const topics = fact === undefined ? all.topics : all.topics.filter((t) => t.factIds.has(fact));
+    const signature = JSON.stringify([fact ?? null, facts.map((f) => f.id), topics.map((t) => t.text)]);
+    const last = [...runs.values()].reverse().find((r) => r.signature === signature);
+    if (last && Date.now() - last.at < REUSE_MS) {
+      // A new caller of the same run: what earlier pages returned now counts as shown before.
+      last.marked.clear();
+      return last;
+    }
+
+    const matches = await topicMatches(topics.map((t) => t.text));
+    const storyOf = new Map(matches.flatMap((m) => [...m.storyOf]));
     // Stories in turn: each topic's best match before any topic's second.
     const byKey = new Map<string, Story>();
     const byArticle = new Map<string, Story>();
-    const lists = topics.map((t) => ({ t, ids: ids.get(t.text.toLowerCase()) ?? [] }));
+    const lists = topics.map((t, n) => ({ t, ids: matches[n].ids }));
     for (let rank = 0; lists.some((l) => rank < l.ids.length); rank++) {
       for (const { t, ids: list } of lists) {
         const id = list[rank];
@@ -220,28 +265,50 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
     }
     const run: Run = {
       id: randomBytes(4).toString('hex'),
+      ...(fact === undefined ? {} : { fact }),
       at: Date.now(),
       signature,
       stories: [...byKey.values()],
       byArticle,
       articles: byArticle.size,
       topics: lists.map(({ t, ids: list }) => ({ text: t.text, matches: list.length })),
+      // A topic two facts share still counts only for the facts of this run.
       facts: facts.map((f) => ({ id: f.id, statement: f.statement })),
-      complete,
+      complete: matches.every((m) => m.complete),
       publishers: 0,
       languages: 0,
       marked: new Set(),
     };
     runs.set(run.id, run);
-    for (const [id, r] of runs) if (runs.size > RUNS_KEPT || Date.now() - r.at > RUN_KEPT_MS) runs.delete(id);
+    held = undefined;
+    // Oldest first: a scope keeps its newest runs, so one lane paging never expires another's cursor.
+    for (const [id, r] of runs) {
+      if (Date.now() - r.at > RUN_KEPT_MS || [...runs.values()].filter((x) => x.fact === r.fact).length > RUNS_KEPT) runs.delete(id);
+    }
     return run;
   }
 
+  /** Article ids by story key across every run kept, built again after runs change. */
+  let held: Map<string, Set<string>> | undefined;
+  /** Every report of a story the pod holds: a fact's run holds only the reports that fact's topics matched. */
+  const idsOf = (key: string, ids: string[]) => {
+    if (!held) {
+      held = new Map();
+      for (const r of runs.values()) {
+        for (const st of r.stories) held.set(st.key, new Set([...(held.get(st.key) ?? []), ...st.ids]));
+      }
+    }
+    return [...new Set([...ids, ...(held.get(key) ?? [])])];
+  };
+
   /** Every article id of a story the assistant left out. */
-  const leftOut = () => new Set(Object.values(data.stories).flatMap((v) => (v.verdict === 'left_out' ? v.ids : [])));
+  const leftOut = () => new Set(Object.entries(data.stories).flatMap(([k, v]) => (v.verdict === 'left_out' ? idsOf(k, v.ids) : [])));
 
   /** The pod's own verdicts by article id: its picks (its AI service's, and the assistant's saved before), and what its scoring finished without picking. */
-  async function podPicks(): Promise<Map<string, StoryVerdict>> {
+  let picksP: Promise<Map<string, StoryVerdict>> | undefined;
+  // Lanes loading together share one read of the feed.
+  const podPicks = () => (picksP ??= podPicksOnce().finally(() => (picksP = undefined)));
+  async function podPicksOnce(): Promise<Map<string, StoryVerdict>> {
     const { candidates, rows } = await readFeed(leftOut());
     const out = new Map<string, StoryVerdict>();
     for (const c of candidates) for (const id of c.memberIds) out.set(id, { verdict: 'picked', reason: c.pick.reason, level: c.pick.level, by: 'pod' });
@@ -257,7 +324,7 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
   const verdictOf = (story: Story, picks: Map<string, StoryVerdict>): StoryVerdict | undefined => {
     const stored = storedOf(story)?.[1];
     if (stored) return { verdict: stored.verdict, reason: stored.reason, ...(stored.level ? { level: stored.level } : {}), by: 'assistant', at: stored.at };
-    for (const id of story.ids) if (picks.has(id)) return picks.get(id);
+    for (const id of idsOf(story.key, story.ids)) if (picks.has(id)) return picks.get(id);
     return undefined;
   };
 
@@ -294,12 +361,25 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
   }
 
   async function hydrate(ids: string[]): Promise<Map<string, ArticleIn>> {
-    const out = new Map<string, ArticleIn>();
-    for (let i = 0; i < ids.length; i += HYDRATE_CHUNK) {
-      const got = await ask<{ articlesForTopicsByIds: { articles: ArticleIn[] } }>('GetArticlesForTopicsByIds', BY_IDS, { articleIds: ids.slice(i, i + HYDRATE_CHUNK) });
-      for (const a of got.articlesForTopicsByIds.articles ?? []) out.set(a._id, a);
+    const now = Date.now();
+    for (const [k, c] of articleCache) if (now - c.at >= REUSE_MS) articleCache.delete(k);
+    // Held here, so an entry another call drops while this one waits is still answered.
+    const want = new Map(ids.map((id) => [id, articleCache.get(id)?.p]));
+    const missing = ids.filter((id) => !want.get(id));
+    for (let i = 0; i < missing.length; i += HYDRATE_CHUNK) {
+      const chunk = missing.slice(i, i + HYDRATE_CHUNK);
+      const asked = ask<{ articlesForTopicsByIds: { articles: ArticleIn[] } }>('GetArticlesForTopicsByIds', BY_IDS, { articleIds: chunk }).then((got) => new Map((got.articlesForTopicsByIds.articles ?? []).map((a) => [a._id, a])));
+      for (const id of chunk) {
+        const p = asked.then((m) => m.get(id));
+        cache(articleCache, id, now, p);
+        want.set(id, p);
+      }
+      // One request at a time; a failed one fails the call at once.
+      await asked;
     }
-    return out;
+    const got = await Promise.all(want.values());
+    const keys = [...want.keys()];
+    return new Map(keys.flatMap((id, n) => (got[n] ? [[id, got[n]] as const] : [])));
   }
 
   /** Reads every article of the run once, and counts its publishers and languages. */
@@ -342,16 +422,19 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
     async forProfile(options = {}) {
       const limit = options.limit ?? PAGE_DEFAULT;
       if (!Number.isInteger(limit) || limit < 0 || limit > PAGE_MAX) throw bad(`limit must be a whole number from 0 to ${PAGE_MAX}.`);
+      const { fact } = options;
+      if (fact !== undefined && (typeof fact !== 'string' || !fact)) throw bad('fact must be the id of a saved fact.');
       let run: Run;
       let start = 0;
       if (options.after !== undefined) {
         const m = /^([0-9a-f]{8})\.(\d{1,6})$/.exec(String(options.after));
         const found = m && runs.get(m[1]);
         if (!found) throw new PodError('run_expired', 'That page of stories has expired.', 'call again without after to start from the first page');
+        if (found.fact !== fact) throw bad('That cursor belongs to a run for another fact: pass the same fact as the call that gave it.');
         run = found;
         start = Number(m[2]);
       } else {
-        run = await startRun();
+        run = await startRun(fact);
       }
       const picks = await podPicks();
       await hydrateRun(run);
@@ -414,7 +497,8 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
         for (const item of clean) {
           // The newest run that holds this article names its whole story.
           const known = [...runs.values()].reverse().find((r) => r.byArticle.has(item.id))?.byArticle.get(item.id);
-          const story: Story = known ?? { key: `a:${item.id}`, ids: [item.id], topics: new Set(), factIds: new Set() };
+          // Its reports from every run, so a verdict through one fact's lane covers the others' too.
+          const story: Story = known ? { ...known, ids: idsOf(known.key, known.ids) } : { key: `a:${item.id}`, ids: [item.id], topics: new Set(), factIds: new Set() };
           const before = verdictOf(story, picks)?.verdict ?? seen.get(story.key);
           if (before) {
             result.already.push({ id: item.id, verdict: before });

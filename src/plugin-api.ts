@@ -185,6 +185,43 @@ export interface JudgeResult {
   refused: { id: string; code: string; message: string }[];
 }
 
+/** One article of a followed story: never any article text beyond its headline. */
+export interface FollowedArticle {
+  id: string;
+  /** The headline in the article's own language (`lang`), or the English one when the pod has only that. */
+  title: string;
+  /** The English headline, when it differs from `title`. */
+  titleEn?: string;
+  /** The article's language, `und` when unknown. */
+  lang: string;
+  publisher: string;
+  /** The publisher's three-letter country code, when known. */
+  country?: string;
+  /** Null once the pod no longer holds the article's link. */
+  url: string | null;
+  /** The publisher's image, https only. */
+  image?: string | null;
+  publishedAt: string | null;
+}
+
+/** A story the person follows: it grows with every read that finds more of it. */
+export interface FollowedStoryView {
+  id: string;
+  title: string;
+  /** True when the title was written by Mera News (the story's label or its search), not a headline. */
+  titleIsAi: boolean;
+  /** Stories added since the person last looked, shared with a paired phone. */
+  newCount: number;
+  /** Articles on its timeline, copies of one story included. */
+  articles: number;
+  /** The newest article on its timeline. */
+  latest: FollowedArticle | null;
+  /** ISO time it last grew, or when it was followed. */
+  updatedAt: string;
+  followedAt: string;
+  status: 'active' | 'ended';
+}
+
 export type SuggestionsState = 'ok' | 'no_facts' | 'topics_pending' | 'first_read_pending' | 'paused' | 'problem';
 
 export interface SuggestionsReply {
@@ -340,8 +377,12 @@ export interface PodServices {
      * `peek`, the unjudged stories returned are recorded as shown, and later runs leave them out for 72
      * hours; `peek` records nothing, for a page that only shows stories. `fits` works as in
      * `suggestions.get`, and is given the page's summary too. An `after` from a run the pod no longer holds fails with `run_expired`.
+     * `fact` limits the run to the stories that fact's topics matched, with the summary counted for
+     * that fact only, and its own run and cursor, so each fact can load and page on its own; what
+     * another run already fetched is not fetched again. An unknown fact, or an `after` from a run for
+     * another fact, fails with `bad_input`.
      */
-    forProfile(options?: { after?: string; limit?: number; peek?: boolean; fits?: (stories: ProfileStory[], summary: StoriesSummary) => boolean }): Promise<StoriesPage>;
+    forProfile(options?: { fact?: string; after?: string; limit?: number; peek?: boolean; fits?: (stories: ProfileStory[], summary: StoriesSummary) => boolean }): Promise<StoriesPage>;
     /**
      * Saves one verdict per story, by the `id` `forProfile` gave: picked (with a level) or left out,
      * each with a one-sentence reason. A story keeps its first verdict, whichever report is named. A
@@ -350,6 +391,30 @@ export interface PodServices {
      * with `bad_input` before anything is saved.
      */
     judge(verdicts: { id: string; verdict: Verdict; reason: string; level?: PickLevel }[]): Promise<JudgeResult>;
+  };
+  /** Contract version 2 and later. The stories the person follows, as the Mera News app shows them. */
+  followed: {
+    /** Every followed story: those with new articles first, then the most recently updated. */
+    list(): Promise<{ stories: FollowedStoryView[] }>;
+    /**
+     * One story and a page of its timeline, newest first, copies of one event folded into one entry
+     * (`copies` counts the others). `limit` is 1 to 50 (default 20); `cursor` goes back as `after`.
+     * `markSeen: true` clears its new count, also on a paired phone, so a page that only shows the
+     * story leaves it out; `story.newCount` is the count before it was cleared. An unknown id fails
+     * with `unknown_story`.
+     */
+    get(id: string, options?: { after?: string; limit?: number; markSeen?: boolean }): Promise<{ story: FollowedStoryView; entries: { head: FollowedArticle; copies: number }[]; cursor: string | null; more: boolean }>;
+    /**
+     * Follows a story by what to search for: `text` is 1 to 80 characters, kept as written. `label`
+     * (default `text`) is its title; `fromArticleId` seeds it with that article. Following the same
+     * search again answers `already` with the story's id. The story grows only while the pod reads
+     * the news, which needs an AI service; `hint` says so.
+     */
+    follow(input: { text: string; label?: string; fromArticleId?: string }): Promise<{ id: string; state: 'followed' | 'already'; hint: string }>;
+    /** Stops following and stops its search. An unknown id fails with `unknown_story`. */
+    unfollow(id: string): Promise<{ removed: true }>;
+    /** Takes an article, with the copies folded with it, off the story's timeline for good. */
+    removeArticle(id: string, articleId: string): Promise<{ removed: true }>;
   };
   /** Contract version 2 and later. */
   commands: {

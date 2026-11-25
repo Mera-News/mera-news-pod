@@ -186,3 +186,104 @@ test('with an AI service: a story the assistant left out is never a pick once th
     await w.close();
   }
 });
+
+test('one fact at a time: its own stories, run and cursor, the summary counted for it alone, and nothing asked twice', async () => {
+  const w = await world({ articles: ARTICLES, topics: TOPICS, config: { ai: undefined } });
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    const facts = await profile(pod);
+    const asked = (op: string) => w.data.requests.filter((r: any) => r.body?.operationName === op);
+    const idsAsked = () => asked('GetArticlesForTopicsByIds').flatMap((r: any) => r.body.variables.articleIds);
+    const topicsAsked = () => asked('GetArticleIdsForPersona').flatMap((r: any) => r.body.variables.query.topics.map((t: any) => t.text));
+
+    const a = await ok(pod, 'stories.forProfile', { fact: facts.a, peek: true });
+    assert.deepEqual(ids(a), ['h1', 'h3'], 'only the stories this fact\'s topics matched');
+    assert.deepEqual(a.stories.map((s: any) => s.facts.map((f: any) => f.id)), [[facts.a], [facts.a]]);
+    assert.deepEqual(a.summary.facts.map((f: any) => [f.id, f.matched]), [[facts.a, 2]]);
+    assert.deepEqual([a.summary.articles, a.summary.stories, a.summary.merged, a.summary.unjudged], [3, 2, 1, 2]);
+    assert.deepEqual(topicsAsked().sort(), ['utrecht housing', 'utrecht transport']);
+
+    const b = await ok(pod, 'stories.forProfile', { fact: facts.b, peek: true });
+    assert.deepEqual(ids(b), ['h4']);
+    assert.notEqual(b.run, a.run, 'each fact has its own run');
+    assert.deepEqual(topicsAsked().sort(), ['nurse strikes', 'utrecht housing', 'utrecht transport'], 'the second fact asks only for its own topics');
+
+    // Every fact at once now asks for nothing: each topic and article was fetched by a fact's run.
+    const before = { topics: topicsAsked().length, ids: idsAsked().length };
+    const all = await ok(pod, 'stories.forProfile', { peek: true });
+    assert.deepEqual(ids(all), ['h1', 'h4', 'h3']);
+    assert.deepEqual({ topics: topicsAsked().length, ids: idsAsked().length }, before);
+    assert.equal(new Set(idsAsked()).size, idsAsked().length, 'no article was read twice');
+
+    // Pages by its own cursor, which another fact cannot use.
+    const one = await ok(pod, 'stories.forProfile', { fact: facts.a, peek: true, limit: 1 });
+    const two = await ok(pod, 'stories.forProfile', { fact: facts.a, peek: true, limit: 1, after: one.nextCursor });
+    assert.deepEqual([...ids(one), ...ids(two)], ['h1', 'h3']);
+    assert.equal(two.nextCursor, undefined);
+    assert.equal((await call(pod, 'stories.forProfile', { fact: facts.b, after: one.nextCursor })).error?.code, 'bad_input');
+    assert.equal((await call(pod, 'stories.forProfile', { after: one.nextCursor })).error?.code, 'bad_input');
+    assert.equal((await call(pod, 'stories.forProfile', { fact: 'nosuchfact' })).error?.code, 'bad_input');
+
+    // Verdicts are shared: a story judged through every fact's run shows its verdict in the fact's run.
+    await ok(pod, 'stories.judge', [{ id: 'h3', verdict: 'left_out', reason: 'Not on your route.' }]);
+    const again = await ok(pod, 'stories.forProfile', { fact: facts.a, peek: true });
+    assert.deepEqual(again.stories.map((s: any) => s.verdict?.verdict ?? null), [null, 'left_out']);
+    assert.deepEqual(again.summary.facts.map((f: any) => [f.leftOut, f.picked]), [[1, 0]]);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('a failed article read answers news_unavailable and the next call reads again; an article the server lacked is asked for again', async () => {
+  const articles = [...ARTICLES];
+  const w = await world({ articles, topics: { ...TOPICS, 'utrecht housing': ['h1', 'h2', 'h9'] }, config: { ai: undefined } });
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    const facts = await profile(pod);
+    w.data.failNext('GetArticlesForTopicsByIds');
+    const failed = await call(pod, 'stories.forProfile', { peek: true });
+    assert.equal(failed.error?.code, 'news_unavailable', failed.error?.message ?? '');
+    // h9 is matched but the server does not hold it yet, so its story is left out of the page.
+    assert.deepEqual(ids(await ok(pod, 'stories.forProfile', { peek: true })), ['h1', 'h4', 'h3']);
+    articles.push({ _id: 'h9', title: 'City council votes on rent cap' });
+    const a = await ok(pod, 'stories.forProfile', { fact: facts.a, peek: true });
+    assert.deepEqual(ids(a), ['h1', 'h3', 'h9'], 'a miss is not kept: the next run asks for it again');
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('a story that spans two facts: left out through one fact\'s lane, it is left out in the other and its other report never becomes a pick', async () => {
+  // x1 and y1 are reports of one story, each matched by a topic of a different fact.
+  const articles = [
+    { _id: 'x1', title: 'Utrecht housing rents rise sharply', story_key: 'shared' },
+    { _id: 'y1', title: 'Hospital nurses walk out over pay', story_key: 'shared' },
+  ];
+  const w = await world({ articles, topics: { 'utrecht housing': ['x1'], 'nurse strikes': ['y1'] } });
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('holdReads', true);
+    const facts = await profile(pod);
+    const a = await ok(pod, 'stories.forProfile', { fact: facts.a, peek: true });
+    assert.deepEqual(ids(a), ['x1']);
+    assert.deepEqual((await ok(pod, 'stories.judge', [{ id: 'x1', verdict: 'left_out', reason: 'Not about your street.' }])).saved, [{ id: 'x1', verdict: 'left_out' }]);
+
+    const b = await ok(pod, 'stories.forProfile', { fact: facts.b, peek: true });
+    assert.deepEqual(b.stories.map((s: any) => [s.id, s.verdict?.verdict ?? null, s.verdict?.by ?? null]), [['y1', 'left_out', 'assistant']]);
+    assert.deepEqual((await ok(pod, 'stories.judge', [{ id: 'y1', verdict: 'picked', level: 'high', reason: 'Hospital nurses walk out.' }])).already, [{ id: 'y1', verdict: 'left_out' }]);
+
+    await until(() => pod.ask('readsRunning'), (r) => r === false, 'reads in flight to finish');
+    // The pod's own reading would pick the other report.
+    await pod.ask('plant', [{ id: 'y1', relevance: 0.95, reason: 'Nurses like you are walking out.', title: 'Hospital nurses walk out over pay' }]);
+    await until(() => pod.ask('rowStatus', 'y1'), (s) => s === 'excluded', 'the other report to be left out');
+    assert.deepEqual((await ok(pod, 'suggestions.get', { since: 'all', limit: 10, peek: true })).picks, []);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});

@@ -59,6 +59,8 @@ export interface FakeDataServer {
   origin: string;
   graphqlUrl: string;
   requests: RecordedRequest[];
+  /** Answers the next request for this operation with a server error of `code` (default `INDEX_NOT_READY`), once. */
+  failNext(operationName: string, code?: string): void;
   close(): Promise<void>;
 }
 
@@ -375,6 +377,7 @@ export async function startFakeDataServer(options: FakeDataServerOptions): Promi
   const schema: GraphQLSchema = buildSchema(readFileSync(options.schemaPath, 'utf8'));
   const rootValue = resolversFor(options);
   const requests: RecordedRequest[] = [];
+  const failing = new Map<string, string>();
 
   // A root field the schema has but this server does not answer is an error, never null data.
   const fieldResolver: typeof defaultFieldResolver = (source, args, context, info) => {
@@ -398,6 +401,11 @@ export async function startFakeDataServer(options: FakeDataServerOptions): Promi
     const body = entry.body as { query?: unknown; variables?: Record<string, unknown>; operationName?: string } | null;
     if (!body || typeof body !== 'object' || typeof body.query !== 'string') {
       return fail(400, 'BAD_REQUEST', 'body has no query string');
+    }
+    const failWith = body.operationName ? failing.get(body.operationName) : undefined;
+    if (failWith) {
+      failing.delete(body.operationName!);
+      return sendJson(res, 200, { data: null, errors: [{ message: 'the server could not answer', extensions: { code: failWith } }] });
     }
     let document;
     try {
@@ -426,6 +434,7 @@ export async function startFakeDataServer(options: FakeDataServerOptions): Promi
     origin,
     graphqlUrl: `${origin}/graphql`,
     requests,
+    failNext: (operationName, code = 'INDEX_NOT_READY') => void failing.set(operationName, code),
     close: () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();

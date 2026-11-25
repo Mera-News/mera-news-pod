@@ -139,6 +139,20 @@ launchd, in `~/Library/LaunchAgents/news.mera.pod.plist`:
 
 Then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/news.mera.pod.plist`. Use the paths of your own `node` and checkout.
 
+### From the Mera News plugin, on macOS
+
+The Mera News extension for Claude Desktop and the plugin for Claude Code run the pod only while the app is open. To keep it running after you quit the app, open the Mera News website on your Mac and turn on You > Settings > Keep Mera News running.
+
+- It needs Node.js 22.13 or newer on your Mac, because the app's own Node cannot run without the app. It looks in `/opt/homebrew/bin`, `/usr/local/bin` and your `PATH`. If it finds none, it says so and shows how to get one (`brew install node`, or the installer from nodejs.org). It never installs anything.
+- It writes `~/Library/LaunchAgents/news.mera.pod.plist`, which runs that Node with the plugin's own `server.cjs serve` on the same home folder, at login and again after a crash. Serve mode runs the pod and its plugins, the website included, with nothing on standard output. Its log is `logs/pod.log` in the home folder, started again once it passes 5 MB.
+- The news key the app hands over is saved as `dataApiKey` in `secrets.json` (readable by you only), if that file has none, since the app is not there to hand it over.
+- While the app runs the pod, the new one waits and takes over within about 10 seconds of the app quitting. From then on, the app only connects to it.
+- Turning it off removes the file and stops the pod a second later. The app starts its own pod again the next time it opens.
+- If an app update removes the `server.cjs` the file names, the next app start points the file at the new one.
+- A `news.mera.pod.plist` you wrote yourself, such as the one above, or one for another home folder, is left as it is, and the setting is not offered.
+
+The pod reads and answers your phone only while the Mac is awake. To keep it awake, change the Mac's energy settings.
+
 ## Notifiers
 
 All three are off by default and are set in `notify` in `pod.json`. Each sends new picks at the levels `emergency` and `high`, and nothing else.

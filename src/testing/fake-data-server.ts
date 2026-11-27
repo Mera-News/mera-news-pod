@@ -179,6 +179,10 @@ function resolversFor(options: FakeDataServerOptions) {
   // Newest first; a missing pubDate is as new as the fake. The sort is stable, so ties keep planted order.
   const newestFirst = (list: FakeArticle[]) =>
     [...list].sort((a, b) => Date.parse(withDefaults(b, now).pubDate) - Date.parse(withDefaults(a, now).pubDate));
+  // The real server's id caps; a request over one is refused whole, never cut.
+  const tooMany = (ids: string[], max: number) => {
+    if (ids.length > max) throw new GraphQLError(`Too many article ids: ${ids.length} exceeds the maximum of ${max}`, { extensions: { code: 'BAD_REQUEST' } });
+  };
   const clamp = (n: number | null | undefined, fallback: number, min: number, max: number) =>
     Math.min(max, Math.max(min, n ?? fallback));
 
@@ -207,10 +211,28 @@ function resolversFor(options: FakeDataServerOptions) {
         };
       });
     },
-    articlesForCountry: ({ countryCode, first, after }: { countryCode?: string | null; first?: number | null; after?: string | null }) => {
+    // The cursor is the offset into the newest-first list; the real server freezes its window, this one has no churn.
+    searchNewsPage: ({ query, limit, after }: { query: string; limit?: number | null; after?: string | null }) => {
+      const words = norm(query).split(' ').filter(Boolean);
+      const found = words.length === 0 ? [] : newestFirst(articles.filter((a) => words.every((w) => `${a.title} ${a.title_en ?? ''}`.toLowerCase().includes(w))));
+      const start = after == null ? 0 : Number(after);
+      if (!Number.isInteger(start) || start < 0) throw new GraphQLError('after is not a cursor this server gave out', { extensions: { code: 'BAD_USER_INPUT' } });
+      const size = clamp(limit, 20, 1, 100);
+      const slice = found.slice(start, start + size);
+      const next = start + slice.length;
+      return {
+        hits: slice.map((a, i) => {
+          const full = withDefaults(a, now);
+          return { _id: a._id, title_en: full.title_en, pubDate: full.pubDate, publication_name: full.publication_name, country_code: full.country_code, image_url: null, score: 1 - (start + i) / (found.length + 1) };
+        }),
+        nextCursor: next < found.length && next < 2500 ? String(next) : null,
+      };
+    },
+    articlesForCountry: ({ countryCode, first, after }: { countryCode?: string | null; first?: number | null; after?: string | null; order?: string | null }) => {
       const code = countryCode?.toUpperCase() === 'GLOBAL' ? null : countryCode;
       const { page, pageInfo } = pageOf(newestFirst(byCountry(code)), clamp(first, 20, 1, 50), after);
-      return { articles: page.map(withSource), pageInfo };
+      // A cursor per article: the article's id, which `after` accepts.
+      return { articles: page.map(withSource), pageInfo, itemCursors: page.map((a) => a._id) };
     },
     articleIdsForPersona: ({ query }: { query: PersonaQuery }) => ({
       topicResults: query.topics.flatMap((t) => {
@@ -239,11 +261,11 @@ function resolversFor(options: FakeDataServerOptions) {
         };
       }),
     }),
-    articlesForTopicsByIds: ({ articleIds }: { articleIds: string[] }) => hydrate(articleIds),
-    articlesForStories: ({ articleIds }: { articleIds: string[] }) => hydrate(articleIds),
+    articlesForTopicsByIds: ({ articleIds }: { articleIds: string[] }) => (tooMany(articleIds, 50), hydrate(articleIds)),
+    articlesForStories: ({ articleIds }: { articleIds: string[] }) => (tooMany(articleIds, 50), hydrate(articleIds)),
     // An unknown id is left out, as the server leaves out one whose links are mid-swap.
     clusterMembershipsForArticles: ({ articleIds }: { articleIds: string[] }) =>
-      articleIds.flatMap((id) => {
+      (tooMany(articleIds, 500), articleIds).flatMap((id) => {
         const found = articles.find((a) => a._id === id);
         return found ? [{ articleId: id, clusters: withDefaults(found, now).clusters }] : [];
       }),
@@ -297,11 +319,11 @@ function resolversFor(options: FakeDataServerOptions) {
       const leads = byCountry(code)
         .filter((a) => served.includes(a))
         .filter((a, i, list) => !a.story_key || list.findIndex((b) => b.story_key === a.story_key) === i);
-      const { page, pageInfo } = pageOf(leads, first, after);
+      const { page, pageInfo } = pageOf(leads, clamp(first, 20, 1, 200), after);
       const picked = page.map(withSource);
       return {
         articles: picked,
-        headlines: page.map((a, i) => ({ article: picked[i], clusterSize: reportsOf(a).length, stableClusterId: `stable-${a.story_key ?? a._id}` })),
+        headlines: page.map((a, i) => ({ article: picked[i], clusterSize: reportsOf(a).length, cursor: a._id, publisherCount: reportsOf(a).length < 2 ? 0 : new Set(reportsOf(a).map((r) => withDefaults(r, now).publication_name)).size, stableClusterId: `stable-${a.story_key ?? a._id}` })),
         editionBuiltAt: now,
         pageInfo,
       };

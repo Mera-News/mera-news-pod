@@ -271,6 +271,55 @@ describe('fake data server', () => {
     assert.equal(keyed.requests.at(-1)?.headers['x-api-key'], undefined);
   });
 
+  it('enforces the real caps and serves the new fields over 1000 articles', async () => {
+    const many = Array.from({ length: 1000 }, (_, i) => ({
+      _id: `n${String(i).padStart(4, '0')}`,
+      title: `Big story ${i}`,
+      country_code: 'NL',
+      pubDate: new Date(Date.now() - i * 1000).toISOString(),
+      story_key: i < 3 ? 'one' : null,
+      publication_name: `Pub ${i}`,
+    }));
+    const big = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles: many, topics: {} });
+    try {
+      const ask = async (q: string, variables?: unknown) => (await (await query(big, q, variables)).json()) as any;
+      const ids = (n: number) => many.slice(0, n).map((a) => a._id);
+      const byIds = 'query($ids: [ID!]!){ articlesForTopicsByIds(articleIds: $ids){ articles { _id } } }';
+      assert.equal((await ask(byIds, { ids: ids(50) })).data.articlesForTopicsByIds.articles.length, 50);
+      assert.equal((await ask(byIds, { ids: ids(51) })).errors[0].extensions.code, 'BAD_REQUEST');
+      const members = 'query($ids: [ID!]!){ clusterMembershipsForArticles(articleIds: $ids){ articleId } }';
+      assert.equal((await ask(members, { ids: ids(500) })).data.clusterMembershipsForArticles.length, 500);
+      assert.equal((await ask(members, { ids: ids(501) })).errors[0].extensions.code, 'BAD_REQUEST');
+
+      // Newest page max 50, with one cursor per article that continues right after it.
+      const newest = await ask('{ articlesForCountry(countryCode: "NL", first: 500, order: NEWEST){ articles { _id } itemCursors } }').then((r) => r.data.articlesForCountry);
+      assert.equal(newest.articles.length, 50);
+      assert.deepEqual(newest.itemCursors, newest.articles.map((a: any) => a._id));
+
+      // Search pages clamp at 100 and walk every hit once.
+      const seen: string[] = [];
+      let after: string | null = null;
+      do {
+        const page: any = (await ask('query($a: String){ searchNewsPage(query: "big story", limit: 5000, after: $a){ hits { _id } nextCursor } }', { a: after })).data.searchNewsPage;
+        assert.ok(page.hits.length <= 100);
+        seen.push(...page.hits.map((h: any) => h._id));
+        after = page.nextCursor;
+      } while (after);
+      assert.equal(new Set(seen).size, 1000);
+
+      // Headlines clamp first to 1..200; the story of three reports counts three publishers.
+      const top = (first: number) => ask(`{ topHeadlinesForCountry(countryCode: "NL", first: ${first}, windowHours: 48){ headlines { cursor publisherCount } } }`).then((r) => r.data.topHeadlinesForCountry.headlines);
+      assert.equal((await top(5000)).length, 200);
+      assert.equal((await top(0)).length, 1);
+      const [lead, single] = await top(2);
+      assert.equal(lead.publisherCount, 3);
+      assert.equal(single.publisherCount, 0);
+      assert.equal(typeof lead.cursor, 'string');
+    } finally {
+      await big.close();
+    }
+  });
+
   it('lists only the origins that were contacted', () => {
     assert.deepEqual(recordedOrigins(data), [data.origin]);
   });

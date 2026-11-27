@@ -12,7 +12,7 @@ env:
   # The data server commit whose one-computer store the local-store job runs, and the plugins commit
   # whose mcp plugin it loads into the pod.
   LOCAL_STORE_REV: 6ce01ac6aa94ad95405542bf4a0899bab0395d84
-  PLUGINS_REV: 6ccec7172aeb582a60dc905050b74545a2566a25
+  PLUGINS_REV: c5a335331094c2f2f2f10ba1a3627db9e9beb59b
 
 jobs:
   test:

@@ -26,7 +26,7 @@ The settings, where the first two decide where the news comes from:
 
 | Setting | Meaning |
 |---|---|
-| News key | Optional. For Mera News, a key from the form at https://mera.news/api-key, sent by email: it is a test key, 2,000 requests a day, for your own use, and it may be turned off without notice. Never paste it into a chat. For your own news server, the key you set on it (`MERA_NEWS_API_KEY`), or nothing for the one-computer setup. The server setup refuses search in open mode, so give the pod a key there. |
+| News key | Optional. For Mera News, a key from the form at https://mera.news/en/api-key, sent by email: it is a test key, 2,000 requests a day, for your own use, and it may be turned off without notice. Never paste it into a chat. For your own news server, the key you set on it (`MERA_NEWS_API_KEY`), or nothing for the one-computer setup. The server setup refuses search in open mode, so give the pod a key there. |
 | News server address | Optional. Empty uses Mera News. An address, such as `http://127.0.0.1:3002`, uses a [news data server](https://github.com/Mera-News/mera-news-data-server/blob/main/docs/self-host.md) you run, with no key from Mera Labs. A later change applies the next time the app starts. |
 | Also run the Mera News website on this computer | On by default. |
 

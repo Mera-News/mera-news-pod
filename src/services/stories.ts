@@ -150,7 +150,7 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
     if (!reply.errors?.length && reply.data) return reply.data;
     // The server's own text never leaves: it can echo what was asked.
     if (reply.errors?.[0]?.extensions?.code === 'UNAUTHENTICATED') {
-      throw new PodError('key_refused', 'The Mera News key was refused.', 'set the key from Mera Labs in the pod settings, then restart it');
+      throw new PodError('key_refused', 'The Mera News key was refused.', 'set a Mera News key (ask for one at https://mera.news/en/api-key) in the pod settings, or point the pod at a news server you run, then restart it');
     }
     throw new PodError('news_unavailable', 'The news server could not answer.', 'try again in a minute; if it keeps failing, the pod status names what to fix');
   }

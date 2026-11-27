@@ -2,7 +2,7 @@
 // once the client is up. Client modules are loaded inside functions, never at the top of a file,
 // because the client may not be loaded before the pod registers its host.
 import type { ServicesContext } from '../boot';
-import { createNotifier, NOTIFY_LEVELS } from '../notify';
+import { createNotifier, NOTIFY_LEVELS, PartialSendError } from '../notify';
 import type { PickView, PodServices } from '../plugin-api';
 import { createDisplayService } from './display';
 import { createEvents } from './events';
@@ -92,7 +92,15 @@ export function createServices(context: ServicesContext): { services: PodService
           changes.emitNotify(toEmit.map((p) => p.pick));
           emittedSeq = toEmit[toEmit.length - 1].seq;
         }
-        if (notifier && important.length) await notifier.send(important.map((p) => p.pick));
+        if (notifier && important.length) {
+          try {
+            await notifier.send(important.map((p) => p.pick));
+          } catch (error) {
+            // What was delivered stays delivered: the retry starts after the last pick that got through.
+            if (error instanceof PartialSendError) control.setNotifiedSeq(important[error.delivered - 1].seq);
+            throw error;
+          }
+        }
         control.setNotifiedSeq(fresh[fresh.length - 1].seq);
       })
       .catch((error) => log('warning', `A notifier could not send and will try again: ${(error as Error).message}`));

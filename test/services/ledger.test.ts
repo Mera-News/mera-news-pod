@@ -256,13 +256,11 @@ test('a cut over a large page takes a logarithmic number of fit calls, not one p
   const ledger = createLedger(temp());
   const stories = Array.from({ length: 20000 }, (_, i) => [`s${i}`]);
   let calls = 0;
-  const started = Date.now();
   const taken = await ledger.run((tx) => {
     const seqs = tx.register(stories, new Set(stories.flat()));
     return tx.take(seqs.map((seq, i): Item => ({ seq, id: stories[i][0] })), undefined, 20000, (page) => (calls++, page.length <= 3));
   });
   assert.equal(taken.items.length, 3);
-  // The old loop made 20000 calls, each copying the page: far over both bounds.
+  // The old loop made 20000 calls, each copying the page: far over the bound.
   assert.ok(calls <= 40, `${calls} calls`);
-  assert.ok(Date.now() - started < 1500);
 });

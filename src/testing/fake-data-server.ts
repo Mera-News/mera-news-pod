@@ -61,6 +61,8 @@ export interface FakeDataServer {
   requests: RecordedRequest[];
   /** Answers the next request for this operation with a server error of `code` (default `INDEX_NOT_READY`), once. */
   failNext(operationName: string, code?: string): void;
+  /** Rebuilds the headline edition: a cursor from the old build answers EDITION_CHANGED. */
+  rebuildEdition(): void;
   close(): Promise<void>;
 }
 
@@ -131,7 +133,7 @@ const asSource = (name: string, country: string | null, now: string) => ({
 
 const WINDOWS = [6, 12, 24, 48];
 
-function resolversFor(options: FakeDataServerOptions) {
+function resolversFor(options: FakeDataServerOptions, edition: { builtAt: string }) {
   const { articles, topics } = options;
   const now = new Date().toISOString();
   const served = options.headlines ? options.headlines.flatMap((id) => articles.filter((a) => a._id === id)) : articles;
@@ -211,26 +213,52 @@ function resolversFor(options: FakeDataServerOptions) {
         };
       });
     },
-    // The cursor is the offset into the newest-first list; the real server freezes its window, this one has no churn.
+    // The cursor is opaque like the real one: base64 of {asOf, from, offset}. The fake has no churn, so asOf and from only gate a forged cursor.
     searchNewsPage: ({ query, limit, after }: { query: string; limit?: number | null; after?: string | null }) => {
+      const badCursor = () => new GraphQLError('after is not a cursor this server gave out', { extensions: { code: 'BAD_USER_INPUT' } });
+      let start = 0;
+      if (after != null) {
+        let c: { asOf?: unknown; from?: unknown; offset?: unknown };
+        try {
+          c = JSON.parse(Buffer.from(after, 'base64').toString('utf-8'));
+        } catch {
+          throw badCursor();
+        }
+        const asOf = typeof c.asOf === 'string' ? Date.parse(c.asOf) : NaN;
+        const from = typeof c.from === 'string' ? Date.parse(c.from) : NaN;
+        if (Number.isNaN(asOf) || Number.isNaN(from) || typeof c.offset !== 'number' || !Number.isInteger(c.offset) || c.offset < 0) throw badCursor();
+        // A window the server never gave out: asOf in the future beyond 5 minutes of skew, or wider than 48 hours.
+        if (asOf > Date.now() + 5 * 60_000 || from < asOf - 48 * 3_600_000) throw badCursor();
+        start = c.offset;
+      }
       const words = norm(query).split(' ').filter(Boolean);
       const found = words.length === 0 ? [] : newestFirst(articles.filter((a) => words.every((w) => `${a.title} ${a.title_en ?? ''}`.toLowerCase().includes(w))));
-      const start = after == null ? 0 : Number(after);
-      if (!Number.isInteger(start) || start < 0) throw new GraphQLError('after is not a cursor this server gave out', { extensions: { code: 'BAD_USER_INPUT' } });
-      const size = clamp(limit, 20, 1, 100);
+      const size = Math.min(clamp(limit, 20, 1, 100), 2500 - start);
+      if (size <= 0) return { hits: [], nextCursor: null };
       const slice = found.slice(start, start + size);
       const next = start + slice.length;
+      const asOf = new Date();
       return {
         hits: slice.map((a, i) => {
           const full = withDefaults(a, now);
           return { _id: a._id, title_en: full.title_en, pubDate: full.pubDate, publication_name: full.publication_name, country_code: full.country_code, image_url: null, score: 1 - (start + i) / (found.length + 1) };
         }),
-        nextCursor: next < found.length && next < 2500 ? String(next) : null,
+        nextCursor: next < found.length && next < 2500 ? Buffer.from(JSON.stringify({ asOf: asOf.toISOString(), from: new Date(asOf.getTime() - 48 * 3_600_000).toISOString(), offset: next }), 'utf-8').toString('base64') : null,
       };
     },
-    articlesForCountry: ({ countryCode, first, after }: { countryCode?: string | null; first?: number | null; after?: string | null; order?: string | null }) => {
+    articlesForCountry: ({ countryCode, first, after, order }: { countryCode?: string | null; first?: number | null; after?: string | null; order?: string | null }) => {
       const code = countryCode?.toUpperCase() === 'GLOBAL' ? null : countryCode;
-      const { page, pageInfo } = pageOf(newestFirst(byCountry(code)), clamp(first, 20, 1, 50), after);
+      // NEWEST: newest first, 50 a page. TOP_HEADLINES (default): one lead per story, the biggest story first, ties newest first, 200 a page.
+      // shortcut: no 24h or 48h window, the fake dates articles to its start; upgrade when a test needs an article to age out.
+      const newest = order === 'NEWEST';
+      const list = newest
+        ? newestFirst(byCountry(code))
+        : newestFirst(byCountry(code))
+            .filter((a, i, all) => !a.story_key || all.findIndex((b) => b.story_key === a.story_key) === i)
+            .map((a, i) => ({ a, i }))
+            .sort((x, y) => reportsOf(y.a).length - reportsOf(x.a).length || x.i - y.i)
+            .map((e) => e.a);
+      const { page, pageInfo } = pageOf(list, clamp(first, 20, 1, newest ? 50 : 200), after);
       // A cursor per article: the article's id, which `after` accepts.
       return { articles: page.map(withSource), pageInfo, itemCursors: page.map((a) => a._id) };
     },
@@ -312,20 +340,35 @@ function resolversFor(options: FakeDataServerOptions) {
       vectorIndexState: null,
       embeddingModel: null,
     }),
-    // One headline per story, led by its first served report, paged by the lead's id.
+    // One headline per story, led by its first served report. Cursors are opaque offsets that carry the edition's builtAt, as the real ones do.
     topHeadlinesForCountry: ({ countryCode, first, after, windowHours }: { countryCode?: string | null; first: number; after?: string | null; windowHours: number }) => {
       if (!WINDOWS.includes(windowHours)) throw new GraphQLError(`windowHours must be one of ${WINDOWS.join(', ')}`, { extensions: { code: 'BAD_WINDOW' } });
       const code = countryCode?.toUpperCase() === 'GLOBAL' ? null : countryCode;
       const leads = byCountry(code)
         .filter((a) => served.includes(a))
         .filter((a, i, list) => !a.story_key || list.findIndex((b) => b.story_key === a.story_key) === i);
-      const { page, pageInfo } = pageOf(leads, clamp(first, 20, 1, 200), after);
+      const encode = (offset: number) => Buffer.from(JSON.stringify({ offset, builtAt: edition.builtAt }), 'utf-8').toString('base64');
+      let offset = 0;
+      if (after != null) {
+        let c: { offset?: unknown; builtAt?: unknown };
+        try {
+          c = JSON.parse(Buffer.from(after, 'base64').toString('utf-8'));
+        } catch {
+          c = {};
+        }
+        if (typeof c.offset !== 'number' || !Number.isInteger(c.offset) || c.offset < 0) throw new GraphQLError('after is not a cursor this server gave out', { extensions: { code: 'BAD_USER_INPUT' } });
+        if (c.builtAt !== edition.builtAt) throw new GraphQLError('The headline list was rebuilt after this cursor was given out. Start again from the first page.', { extensions: { code: 'EDITION_CHANGED' } });
+        offset = c.offset;
+      }
+      const size = clamp(first, 20, 1, 200);
+      const page = leads.slice(offset, offset + size);
+      const hasNextPage = offset + page.length < leads.length;
       const picked = page.map(withSource);
       return {
         articles: picked,
-        headlines: page.map((a, i) => ({ article: picked[i], clusterSize: reportsOf(a).length, cursor: a._id, publisherCount: reportsOf(a).length < 2 ? 0 : new Set(reportsOf(a).map((r) => withDefaults(r, now).publication_name)).size, stableClusterId: `stable-${a.story_key ?? a._id}` })),
-        editionBuiltAt: now,
-        pageInfo,
+        headlines: page.map((a, i) => ({ article: picked[i], clusterSize: reportsOf(a).length, cursor: encode(offset + i + 1), publisherCount: reportsOf(a).length < 2 ? 0 : new Set(reportsOf(a).map((r) => withDefaults(r, now).publication_name)).size, stableClusterId: `stable-${a.story_key ?? a._id}` })),
+        editionBuiltAt: edition.builtAt,
+        pageInfo: { endCursor: hasNextPage ? encode(offset + page.length) : null, hasNextPage, pageSize: page.length },
       };
     },
     newsClusterForArticle: ({ articleId }: { articleId: string }) => {
@@ -397,7 +440,8 @@ export async function startFakeDataServer(options: FakeDataServerOptions): Promi
     );
   }
   const schema: GraphQLSchema = buildSchema(readFileSync(options.schemaPath, 'utf8'));
-  const rootValue = resolversFor(options);
+  const edition = { builtAt: new Date().toISOString() };
+  const rootValue = resolversFor(options, edition);
   const requests: RecordedRequest[] = [];
   const failing = new Map<string, string>();
 
@@ -456,6 +500,7 @@ export async function startFakeDataServer(options: FakeDataServerOptions): Promi
     origin,
     graphqlUrl: `${origin}/graphql`,
     requests,
+    rebuildEdition: () => void (edition.builtAt = new Date(Math.max(Date.now(), Date.parse(edition.builtAt) + 1)).toISOString()),
     failNext: (operationName, code = 'INDEX_NOT_READY') => void failing.set(operationName, code),
     close: () =>
       new Promise<void>((resolve) => {

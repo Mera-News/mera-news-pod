@@ -130,8 +130,8 @@ describe('fake data server', () => {
         query(server, 'query($a: String){ topHeadlinesForCountry(first: 1, after: $a){ headlines { clusterSize stableClusterId article { _id original_language_code publicationSource { publication_name } } } pageInfo { endCursor hasNextPage } } }', { a: after }).then((r) => r.json() as Promise<any>);
       const first = (await top()).data.topHeadlinesForCountry;
       assert.deepEqual(first.headlines, [{ clusterSize: 3, stableClusterId: 'stable-storm', article: { _id: 's1', original_language_code: 'en', publicationSource: { publication_name: 'Paper A' } } }]);
-      assert.deepEqual(first.pageInfo, { endCursor: 's1', hasNextPage: true });
-      const second = (await top('s1')).data.topHeadlinesForCountry;
+      assert.equal(first.pageInfo.hasNextPage, true);
+      const second = (await top(first.pageInfo.endCursor)).data.topHeadlinesForCountry;
       assert.deepEqual(second.headlines.map((h: any) => [h.clusterSize, h.stableClusterId, h.article._id]), [[1, 'stable-x1', 'x1']]);
       assert.equal(second.pageInfo.hasNextPage, false);
       assert.equal((await top('nope')).errors[0].extensions.code, 'BAD_USER_INPUT');
@@ -317,6 +317,84 @@ describe('fake data server', () => {
       assert.equal(typeof lead.cursor, 'string');
     } finally {
       await big.close();
+    }
+  });
+
+  it('articlesForCountry defaults to the biggest story first with a 200 clamp, and NEWEST is newest first with a 50 clamp', async () => {
+    const many = Array.from({ length: 300 }, (_, i) => ({
+      _id: `c${String(i).padStart(3, '0')}`,
+      title: `Item ${i}`,
+      country_code: 'NL',
+      pubDate: new Date(Date.now() - i * 1000).toISOString(),
+      // The two oldest articles share a story, so that story is the biggest.
+      story_key: i >= 298 ? 'big' : null,
+      publication_name: `Pub ${i}`,
+    }));
+    const server = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles: many, topics: {} });
+    try {
+      const ask = async (q: string) => ((await (await query(server, q)).json()) as any).data.articlesForCountry;
+      const top = await ask('{ articlesForCountry(countryCode: "NL", first: 1000){ articles { _id } itemCursors } }');
+      assert.equal(top.articles.length, 200);
+      assert.equal(top.articles[0]._id, 'c298');
+      assert.equal(top.articles[1]._id, 'c000');
+      assert.equal(top.itemCursors.length, 200);
+      const newest = await ask('{ articlesForCountry(countryCode: "NL", first: 1000, order: NEWEST){ articles { _id } itemCursors } }');
+      assert.equal(newest.articles.length, 50);
+      assert.equal(newest.articles[0]._id, 'c000');
+      assert.equal(newest.itemCursors.length, 50);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('searchNewsPage clamps depth to 2500, gives opaque cursors and refuses a forged window', async () => {
+    const many = Array.from({ length: 2600 }, (_, i) => ({ _id: `q${i}`, title: `Wide story ${i}`, pubDate: new Date(Date.now() - i * 1000).toISOString() }));
+    const server = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles: many, topics: {} });
+    try {
+      const ask = async (after: string | null, limit = 100) =>
+        ((await (await query(server, 'query($a: String, $l: Int){ searchNewsPage(query: "wide story", limit: $l, after: $a){ hits { _id } nextCursor } }', { a: after, l: limit })).json()) as any);
+      const first = (await ask(null)).data.searchNewsPage;
+      const decoded = JSON.parse(Buffer.from(first.nextCursor, 'base64').toString('utf8'));
+      assert.deepEqual(Object.keys(decoded).sort(), ['asOf', 'from', 'offset']);
+      assert.equal(decoded.offset, 100);
+      // Walk to the depth: the last page is cut to 2500 - offset and has no cursor.
+      let page = first;
+      let total = first.hits.length;
+      while (page.nextCursor) {
+        page = (await ask(page.nextCursor, 70)).data.searchNewsPage;
+        total += page.hits.length;
+      }
+      assert.equal(total, 2500);
+      const cursor = (c: object) => Buffer.from(JSON.stringify(c), 'utf8').toString('base64');
+      const now = Date.now();
+      const asOf = new Date(now).toISOString();
+      const from = new Date(now - 48 * 3_600_000).toISOString();
+      assert.equal((await ask(cursor({ asOf, from, offset: 2450 }))).data.searchNewsPage.hits.length, 50);
+      const refused = async (c: string) => assert.equal((await ask(c)).errors[0].extensions.code, 'BAD_USER_INPUT');
+      await refused(cursor({ asOf: new Date(now + 10 * 60_000).toISOString(), from, offset: 0 }));
+      await refused(cursor({ asOf, from: new Date(now - 49 * 3_600_000).toISOString(), offset: 0 }));
+      await refused('5');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('headline cursors carry builtAt and a rebuilt edition answers EDITION_CHANGED to an old one', async () => {
+    const server = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles: [1, 2, 3].map((i) => ({ _id: `h${i}`, title: `Head ${i}` })), topics: {} });
+    try {
+      const top = async (after: string | null) =>
+        ((await (await query(server, 'query($a: String){ topHeadlinesForCountry(first: 1, after: $a, windowHours: 24){ headlines { cursor } editionBuiltAt pageInfo { endCursor } } }', { a: after })).json()) as any);
+      const one = (await top(null)).data.topHeadlinesForCountry;
+      const builtAt = one.editionBuiltAt;
+      for (const c of [one.headlines[0].cursor, one.pageInfo.endCursor]) assert.equal(JSON.parse(Buffer.from(c, 'base64').toString('utf8')).builtAt, builtAt);
+      assert.equal((await top(one.pageInfo.endCursor)).data.topHeadlinesForCountry.headlines.length, 1);
+      server.rebuildEdition();
+      assert.equal((await top(one.pageInfo.endCursor)).errors[0].extensions.code, 'EDITION_CHANGED');
+      const fresh = (await top(null)).data.topHeadlinesForCountry;
+      assert.notEqual(fresh.editionBuiltAt, builtAt);
+      assert.equal((await top(fresh.pageInfo.endCursor)).data.topHeadlinesForCountry.headlines.length, 1);
+    } finally {
+      await server.close();
     }
   });
 

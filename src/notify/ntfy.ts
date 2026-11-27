@@ -1,6 +1,7 @@
 import type { PickView } from '../plugin-api';
 
 const SEND_TIMEOUT_MS = 10_000;
+export const NTFY_PACE_MS = 500;
 
 // A header carries one line of Latin-1 text, so a title in another script is sent as an encoded word
 // (RFC 2047), which ntfy decodes.
@@ -13,8 +14,10 @@ const header = (text: string) => {
  * One message per pick: the headline, its level and the link, nothing else. An ntfy topic can be
  * read by anyone who knows its name, and a reason is written from the person's profile.
  */
-export async function sendNtfy(url: string, picks: readonly PickView[]): Promise<void> {
-  for (const pick of picks) {
+export async function sendNtfy(url: string, picks: readonly PickView[], paceMs = NTFY_PACE_MS, onSent?: (count: number) => void): Promise<void> {
+  for (const [i, pick] of picks.entries()) {
+    // A burst of hundreds of picks would hit ntfy's rate limit: one message at a time, spaced.
+    if (i > 0 && paceMs > 0) await new Promise((r) => setTimeout(r, paceMs));
     const res = await fetch(url, {
       method: 'POST',
       headers: { Title: header(pick.title), Tags: pick.level, Click: pick.url, 'Content-Type': 'text/plain; charset=utf-8' },
@@ -22,5 +25,6 @@ export async function sendNtfy(url: string, picks: readonly PickView[]): Promise
       signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`ntfy answered ${res.status}`);
+    onSent?.(i + 1);
   }
 }

@@ -5,6 +5,7 @@ import { createServer, type Server } from 'node:http';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { killAll, ok, startServicesPod, until, world } from '../services/helpers';
+import { createNotifier, PartialSendError } from '../../src/notify';
 import { sendNtfy } from '../../src/notify/ntfy';
 import { sendWebhook } from '../../src/notify/webhook';
 import type { PickView } from '../../src/plugin-api';
@@ -17,17 +18,19 @@ interface Sink {
   status: number;
   /** When set, a request is recorded and never answered. */
   hang: boolean;
+  /** Requests after this many answer 429. */
+  tooManyAfter: number;
   close(): Promise<void>;
 }
 /** A loopback server that records what it is sent and answers with `status`. */
 async function startSink(): Promise<Sink> {
-  const sink: Sink = { origin: '', requests: [], status: 200, hang: false, close: async () => {} };
+  const sink: Sink = { origin: '', requests: [], status: 200, hang: false, tooManyAfter: Infinity, close: async () => {} };
   const server: Server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
     sink.requests.push({ path: req.url ?? '', headers: req.headers, body: Buffer.concat(chunks).toString('utf8') });
     if (sink.hang) return;
-    res.writeHead(sink.status);
+    res.writeHead(req.url === '/t' && sink.requests.length > sink.tooManyAfter ? 429 : sink.status);
     res.end('ok');
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -348,5 +351,36 @@ test('notify: with only meraNewsApp on, the loop arms and emits', async () => {
     await pod.ask('stop');
   } finally {
     await w.close();
+  }
+});
+
+test('a 429 part way through a burst keeps the delivered count, and the retry sends only the rest', async () => {
+  const sink = await startSink();
+  try {
+    const picks = Array.from({ length: 5 }, (_, i) => pick({ id: `p${i}`, url: `https://example.com/p${i}` }));
+    const cfg = { notify: { ntfy: { url: `${sink.origin}/t` }, webhook: { url: `${sink.origin}/w` } } } as never;
+    const notifier = createNotifier(cfg, 0)!;
+    sink.tooManyAfter = 2;
+    await assert.rejects(notifier.send(picks), (e) => e instanceof PartialSendError && e.delivered === 2 && /429/.test(e.message));
+    sink.tooManyAfter = Infinity;
+    // The webhook got exactly the two delivered picks in one request, never the unsent ones.
+    const hook = JSON.parse(at(sink, '/w')[0].body);
+    assert.deepEqual(hook.picks.map((p: { url: string }) => p.url), ['https://example.com/p0', 'https://example.com/p1']);
+    assert.equal(sink.requests.length, 4, 'two ntfy messages and a refused third, no more');
+  } finally {
+    await sink.close();
+  }
+});
+
+test('ntfy messages in a burst are spaced by the pace', async () => {
+  const sink = await startSink();
+  try {
+    const picks = [pick({ id: 'a' }), pick({ id: 'b' }), pick({ id: 'c' })];
+    const started = Date.now();
+    await sendNtfy(`${sink.origin}/t`, picks, 120);
+    assert.ok(Date.now() - started >= 220, 'two gaps of about 120 ms');
+    assert.equal(sink.requests.length, 3);
+  } finally {
+    await sink.close();
   }
 });

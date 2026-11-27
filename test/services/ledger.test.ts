@@ -231,3 +231,38 @@ test('a process killed in the middle of saving leaves a ledger that still loads'
     assert.ok(Object.keys(saved.byArticle).length >= 1000);
   }
 });
+
+test('limit 1000 with a fit that admits 30 returns 30, more stays true and the cursor continues with no gap or repeat', async () => {
+  const ledger = createLedger(temp());
+  const stories = Array.from({ length: 100 }, (_, i) => [`s${i}`]);
+  const fits30 = (page: Item[]) => page.length <= 30;
+  const take = (since?: string) => ledger.run((tx) => {
+    const seqs = tx.register(stories, new Set(stories.flat()));
+    return tx.take(seqs.map((seq, i): Item => ({ seq, id: stories[i][0] })), since, 1000, fits30);
+  });
+  const one = await take();
+  assert.equal(one.items.length, 30);
+  assert.equal(one.more, true);
+  const two = await take(one.cursor);
+  assert.deepEqual([...ids(one), ...ids(two)], stories.slice(0, 60).map((s) => s[0]));
+  const rest = [await take(two.cursor), await take()];
+  assert.equal(rest[0].items.length, 30);
+  assert.equal(rest[0].more, true);
+  assert.equal(rest[1].items.length, 10);
+  assert.equal(rest[1].more, false);
+});
+
+test('a cut over a large page takes a logarithmic number of fit calls, not one per item', async () => {
+  const ledger = createLedger(temp());
+  const stories = Array.from({ length: 20000 }, (_, i) => [`s${i}`]);
+  let calls = 0;
+  const started = Date.now();
+  const taken = await ledger.run((tx) => {
+    const seqs = tx.register(stories, new Set(stories.flat()));
+    return tx.take(seqs.map((seq, i): Item => ({ seq, id: stories[i][0] })), undefined, 20000, (page) => (calls++, page.length <= 3));
+  });
+  assert.equal(taken.items.length, 3);
+  // The old loop made 20000 calls, each copying the page: far over both bounds.
+  assert.ok(calls <= 40, `${calls} calls`);
+  assert.ok(Date.now() - started < 1500);
+});

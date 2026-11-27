@@ -287,3 +287,22 @@ test('a story that spans two facts: left out through one fact\'s lane, it is lef
     await w.close();
   }
 });
+
+test('judge accepts 500 verdicts and refuses 501', async () => {
+  const w = await world({ articles: ARTICLES, topics: TOPICS, config: { ai: undefined } });
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    const verdicts = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `x${i}`, verdict: 'left_out', reason: 'Not for me.' }));
+    assert.equal((await ok(pod, 'stories.judge', verdicts(500))).saved.length, 500);
+    const over = await call(pod, 'stories.judge', verdicts(501));
+    assert.equal(over.error?.code, 'bad_input');
+    assert.match(over.error?.message ?? '', /1 to 500/);
+    // limit goes to 1000 and no further.
+    assert.equal((await call(pod, 'stories.forProfile', { peek: true, limit: 1001 })).error?.code, 'bad_input');
+    assert.equal((await call(pod, 'stories.forProfile', { peek: true, limit: 1000 })).error, undefined);
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+  }
+});

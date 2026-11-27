@@ -5,6 +5,7 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { cutToFit } from './cut';
 
 /** An error a plugin can show as it is: a stable code and what to do next. */
 export class PodError extends Error {
@@ -139,7 +140,7 @@ export function createLedger(file: string) {
       }
       const later = items.filter((item) => item.seq > from).sort((a, b) => a.seq - b.seq);
       let page = later.slice(0, limit);
-      while (fits && page.length > 1 && !fits(page)) page = page.slice(0, -1);
+      if (fits) page = cutToFit(page, fits);
       const last = page.length ? page[page.length - 1].seq : from;
       // Delivered when the reply is returned: a reply that is lost on the way repeats, never skips.
       if (!peek && last > state.lastDelivered) {

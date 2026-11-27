@@ -373,7 +373,7 @@ export interface PodServices {
     /**
      * One page of every story that matches the person's topics, each with its verdict when it has one.
      * A call without `after` starts a run (one made in the last minute for the same topics is reused);
-     * `after` continues it. `limit` is 0 to 50 (default 20); 0 returns the summary only. Without
+     * `after` continues it. `limit` is 0 to 1000 (default 20); 0 returns the summary only. Without
      * `peek`, the unjudged stories returned are recorded as shown, and later runs leave them out for 72
      * hours; `peek` records nothing, for a page that only shows stories. `fits` works as in
      * `suggestions.get`, and is given the page's summary too. An `after` from a run the pod no longer holds fails with `run_expired`.
@@ -387,7 +387,7 @@ export interface PodServices {
      * Saves one verdict per story, by the `id` `forProfile` gave: picked (with a level) or left out,
      * each with a one-sentence reason. A story keeps its first verdict, whichever report is named. A
      * pick becomes one of the pod's own picks, so `suggestions.get`, the notifiers and a paired phone
-     * get it; a story left out never shows as a pick. At most 50 at once; a bad item fails the call
+     * get it; a story left out never shows as a pick. At most 500 at once; a bad item fails the call
      * with `bad_input` before anything is saved.
      */
     judge(verdicts: { id: string; verdict: Verdict; reason: string; level?: PickLevel }[]): Promise<JudgeResult>;

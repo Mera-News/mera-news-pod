@@ -7,6 +7,7 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { cutToFit } from './cut';
 import type { JudgeResult, PickLevel, PodServices, ProfileStory, StoriesPage, StoryVerdict, Verdict } from '../plugin-api';
 import { client } from './client';
 import { PodError } from './ledger';
@@ -14,14 +15,15 @@ import { readFeed } from './picks';
 
 /** The news server searches the news of the last 48 hours for each topic. */
 const WINDOW_HOURS = 48;
-const PER_TOPIC = 20;
+const PER_TOPIC = 100;
 /** Topics per request: the server's limit. */
 const TOPICS_PER_REQUEST = 200;
 /** Pages asked for per topic in one run. A run that stops here says it is not complete. */
 const MAX_ROUNDS = 25;
 const HYDRATE_CHUNK = 50;
 const PAGE_DEFAULT = 20;
-const PAGE_MAX = 50;
+const PAGE_MAX = 1000;
+const JUDGE_MAX = 500;
 /** A run started this recently, for the same topics, is used again instead of asking the server. */
 const REUSE_MS = 60_000;
 /** Runs kept per scope: the whole profile, and each fact. */
@@ -457,7 +459,8 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
           return out ? [{ ...c, out }] : [];
         });
         const summary = summarise(run, picks);
-        if (options.fits) while (page.length > 1 && !options.fits(page.map((p) => p.out), summary)) page = page.slice(0, -1);
+        const { fits } = options;
+        if (fits) page = cutToFit(page, (prefix) => fits(prefix.map((p) => p.out), summary));
         // The page ends after its last story kept, so a page cut to fit loses none.
         const end = page.length < chosen.length && page.length > 0 ? page[page.length - 1].at + 1 : i;
         let more = false;
@@ -475,7 +478,7 @@ export function createStories(deps: { news: PodServices['news']; profile: Pick<P
     },
 
     async judge(items) {
-      if (!Array.isArray(items) || items.length < 1 || items.length > 50) throw bad('Pass 1 to 50 verdicts.');
+      if (!Array.isArray(items) || items.length < 1 || items.length > JUDGE_MAX) throw bad(`Pass 1 to ${JUDGE_MAX} verdicts.`);
       const clean = items.map((v, n) => {
         const id = typeof v?.id === 'string' ? v.id : '';
         if (!/^[\w.:-]{1,100}$/.test(id)) throw bad(`Verdict ${n + 1} has no valid id.`);

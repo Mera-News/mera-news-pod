@@ -160,7 +160,12 @@ test('the pod reads the one-computer store: first picks, the read tools, and eve
       assert.ok(found.results.some((r: { title: string }) => r.title === 'Brightwater starts electric buses on three routes'), JSON.stringify(found));
       const latest = await call('latest_news', { limit: 10 });
       assert.deepEqual(latest.results.map((r: { title: string }) => r.title).sort(), [...TITLES].sort());
-      for (const r of [...found.results, ...latest.results]) assert.deepEqual(Object.keys(r).sort(), ['id', 'language', 'link', 'publishedAt', 'publisher', 'title']);
+      for (const r of [...found.results, ...latest.results]) {
+        assert.deepEqual(Object.keys(r).sort(), ['id', 'language', 'link', 'publishedAt', 'publisher', 'show', 'title']);
+        // The show line: a markdown link to the article and the publisher, e.g. [headline](https://...) · Publisher +2 publications.
+        assert.match(r.show, /^\[.+\]\(https?:\/\/[^)\s]+\) · /, r.show);
+        assert.ok(r.show.includes(`](${r.link}) · ${r.publisher}`), r.show);
+      }
     } finally {
       await client.close();
     }

@@ -373,23 +373,30 @@ describe('fake data server', () => {
       const refused = async (c: string) => assert.equal((await ask(c)).errors[0].extensions.code, 'BAD_USER_INPUT');
       await refused(cursor({ asOf: new Date(now + 10 * 60_000).toISOString(), from, offset: 0 }));
       await refused(cursor({ asOf, from: new Date(now - 49 * 3_600_000).toISOString(), offset: 0 }));
+      await refused(cursor({ asOf, from: new Date(now + 1000).toISOString(), offset: 0 }));
+      await refused(cursor({ asOf, from, offset: 0, pad: 'x'.repeat(600) }));
       await refused('5');
     } finally {
       await server.close();
     }
   });
 
-  it('headline cursors carry builtAt and a rebuilt edition answers EDITION_CHANGED to an old one', async () => {
+  it('only a per-headline cursor carries builtAt and answers EDITION_CHANGED after a rebuild; pageInfo.endCursor pages across it', async () => {
     const server = await startFakeDataServer({ schemaPath: defaultSchemaPath(), articles: [1, 2, 3].map((i) => ({ _id: `h${i}`, title: `Head ${i}` })), topics: {} });
     try {
       const top = async (after: string | null) =>
         ((await (await query(server, 'query($a: String){ topHeadlinesForCountry(first: 1, after: $a, windowHours: 24){ headlines { cursor } editionBuiltAt pageInfo { endCursor } } }', { a: after })).json()) as any);
       const one = (await top(null)).data.topHeadlinesForCountry;
       const builtAt = one.editionBuiltAt;
-      for (const c of [one.headlines[0].cursor, one.pageInfo.endCursor]) assert.equal(JSON.parse(Buffer.from(c, 'base64').toString('utf8')).builtAt, builtAt);
+      const parse = (c: string) => JSON.parse(Buffer.from(c, 'base64').toString('utf8'));
+      assert.equal(parse(one.headlines[0].cursor).builtAt, builtAt);
+      assert.deepEqual(parse(one.pageInfo.endCursor), { offset: 1 }, 'the page cursor is a bare offset');
       assert.equal((await top(one.pageInfo.endCursor)).data.topHeadlinesForCountry.headlines.length, 1);
       server.rebuildEdition();
-      assert.equal((await top(one.pageInfo.endCursor)).errors[0].extensions.code, 'EDITION_CHANGED');
+      assert.equal((await top(one.pageInfo.endCursor)).data.topHeadlinesForCountry.headlines.length, 1, 'the page cursor survives a rebuild');
+      assert.equal((await top(one.headlines[0].cursor)).errors[0].extensions.code, 'EDITION_CHANGED');
+      const bad = Buffer.from(JSON.stringify({ offset: 1, builtAt: 5 }), 'utf8').toString('base64');
+      assert.equal((await top(bad)).errors[0].extensions.code, 'BAD_USER_INPUT');
       const fresh = (await top(null)).data.topHeadlinesForCountry;
       assert.notEqual(fresh.editionBuiltAt, builtAt);
       assert.equal((await top(fresh.pageInfo.endCursor)).data.topHeadlinesForCountry.headlines.length, 1);

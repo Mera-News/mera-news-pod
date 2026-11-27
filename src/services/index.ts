@@ -45,9 +45,11 @@ export function createServices(context: ServicesContext): { services: PodService
       return out;
     },
   };
-  const notifier = createNotifier(cfg);
+  // One abort ends a paced ntfy burst and every send in flight when the pod stops.
+  const stopping = new AbortController();
+  const targets = createNotifier(cfg, undefined, stopping.signal);
   const appNotify = !!cfg.notify.meraNewsApp;
-  const running = !!notifier || appNotify;
+  const running = targets.length > 0 || appNotify;
   // Asked once, in the background: a plugin that needs it waits for the answer.
   const dataServer = fetchLimits(cfg);
   const profile = createProfile(() => dataServer, () => !!cfg.ai);
@@ -63,11 +65,15 @@ export function createServices(context: ServicesContext): { services: PodService
       return candidates.map((c, i) => ({ seq: seqs[i], pick: c.pick }));
     });
 
-  // Sends new picks at the top levels, one batch at a time. At least once: what was sent is
-  // recorded only after the send worked, so a failure or a crash in between sends it again.
+  // Sends new picks at the top levels, each target on its own chain and its own position, so a failing
+  // or slow target never holds another back. At least once per target: a position moves only after its
+  // send worked, so a failure or a crash in between sends it again. The saved position is the slowest
+  // target's, so a restart may repeat picks to a faster target, never lose them.
   // shortcut: a failed send is retried when the next story finishes, not on a timer, so a long quiet gap delays it; upgrade to a timer if that matters.
   // A notifier starts at the newest pick when it is first turned on, or when the history starts
   // over, so it never sends the backlog of stories found before it was on.
+  const positions = new Map<string, number>();
+  const chains = new Map<string, Promise<void>>();
   const arm = async () => {
     if (!running) {
       if (control.get().notifyEpoch !== null) control.setNotifyPosition(null, 0);
@@ -77,31 +83,47 @@ export function createServices(context: ServicesContext): { services: PodService
     const { epoch, head } = ledger.position();
     if (control.get().notifyEpoch !== epoch) control.setNotifyPosition(epoch, head);
   };
+  const saveSlowest = () => {
+    if (stopping.signal.aborted) return;
+    control.setNotifiedSeq(Math.min(...targets.map((t) => positions.get(t.name) ?? control.get().notifiedSeq)));
+  };
   let sending: Promise<void> = arm().catch((error) => log('warning', `The notifier could not start: ${(error as Error).message}`));
   let emittedSeq = 0;
+  const deliver = (target: (typeof targets)[number], picks: { seq: number; pick: PickView }[]) => {
+    const run = async () => {
+      if (stopping.signal.aborted) return;
+      const from = positions.get(target.name) ?? control.get().notifiedSeq;
+      const fresh = picks.filter((p) => p.seq > from).sort((a, b) => a.seq - b.seq);
+      if (!fresh.length) return;
+      const important = fresh.filter((p) => NOTIFY_LEVELS.includes(p.pick.level));
+      try {
+        if (important.length) await target.send(important.map((p) => p.pick));
+        positions.set(target.name, fresh[fresh.length - 1].seq);
+      } catch (error) {
+        if (stopping.signal.aborted) return;
+        // What was delivered stays delivered: the retry starts after the last pick that got through.
+        if (error instanceof PartialSendError) positions.set(target.name, important[error.delivered - 1].seq);
+        log('warning', `A notifier could not send and will try again: ${(error as Error).message}`);
+      }
+      saveSlowest();
+    };
+    chains.set(target.name, (chains.get(target.name) ?? Promise.resolve()).then(run));
+  };
   const notifyNew = (picks: { seq: number; pick: PickView }[]) => {
     if (!running) return;
     sending = sending
-      .then(async () => {
+      .then(() => {
+        if (stopping.signal.aborted) return;
         const fresh = picks.filter((p) => p.seq > control.get().notifiedSeq).sort((a, b) => a.seq - b.seq);
         if (!fresh.length) return;
-        const important = fresh.filter((p) => NOTIFY_LEVELS.includes(p.pick.level));
         // Each story is emitted once per process, before ntfy and the webhook, so a failing send never repeats it.
-        const toEmit = important.filter((p) => p.seq > emittedSeq);
+        const toEmit = fresh.filter((p) => NOTIFY_LEVELS.includes(p.pick.level) && p.seq > emittedSeq);
         if (appNotify && toEmit.length) {
           changes.emitNotify(toEmit.map((p) => p.pick));
           emittedSeq = toEmit[toEmit.length - 1].seq;
         }
-        if (notifier && important.length) {
-          try {
-            await notifier.send(important.map((p) => p.pick));
-          } catch (error) {
-            // What was delivered stays delivered: the retry starts after the last pick that got through.
-            if (error instanceof PartialSendError) control.setNotifiedSeq(important[error.delivered - 1].seq);
-            throw error;
-          }
-        }
-        control.setNotifiedSeq(fresh[fresh.length - 1].seq);
+        if (!targets.length) control.setNotifiedSeq(fresh[fresh.length - 1].seq);
+        for (const target of targets) deliver(target, picks);
       })
       .catch((error) => log('warning', `A notifier could not send and will try again: ${(error as Error).message}`));
   };
@@ -178,6 +200,7 @@ export function createServices(context: ServicesContext): { services: PodService
   return {
     services,
     stop() {
+      stopping.abort();
       changes.stop();
       stopTopics();
       stopStories();

@@ -218,6 +218,7 @@ function resolversFor(options: FakeDataServerOptions, edition: { builtAt: string
       const badCursor = () => new GraphQLError('after is not a cursor this server gave out', { extensions: { code: 'BAD_USER_INPUT' } });
       let start = 0;
       if (after != null) {
+        if (after.length > 512) throw badCursor();
         let c: { asOf?: unknown; from?: unknown; offset?: unknown };
         try {
           c = JSON.parse(Buffer.from(after, 'base64').toString('utf-8'));
@@ -227,8 +228,8 @@ function resolversFor(options: FakeDataServerOptions, edition: { builtAt: string
         const asOf = typeof c.asOf === 'string' ? Date.parse(c.asOf) : NaN;
         const from = typeof c.from === 'string' ? Date.parse(c.from) : NaN;
         if (Number.isNaN(asOf) || Number.isNaN(from) || typeof c.offset !== 'number' || !Number.isInteger(c.offset) || c.offset < 0) throw badCursor();
-        // A window the server never gave out: asOf in the future beyond 5 minutes of skew, or wider than 48 hours.
-        if (asOf > Date.now() + 5 * 60_000 || from < asOf - 48 * 3_600_000) throw badCursor();
+        // A window the server never gave out: asOf in the future beyond 5 minutes of skew, a start after asOf, or a window wider than 48 hours (the real bounds).
+        if (asOf > Date.now() + 5 * 60_000 || from > asOf || from < asOf - 48 * 3_600_000) throw badCursor();
         start = c.offset;
       }
       const words = norm(query).split(' ').filter(Boolean);
@@ -340,14 +341,14 @@ function resolversFor(options: FakeDataServerOptions, edition: { builtAt: string
       vectorIndexState: null,
       embeddingModel: null,
     }),
-    // One headline per story, led by its first served report. Cursors are opaque offsets that carry the edition's builtAt, as the real ones do.
+    // One headline per story, led by its first served report. Cursors are opaque offsets. Only a per-headline cursor carries the edition's builtAt (and answers EDITION_CHANGED after a rebuild); pageInfo.endCursor is a bare { offset } and pages across a rebuild, as the real one does.
     topHeadlinesForCountry: ({ countryCode, first, after, windowHours }: { countryCode?: string | null; first: number; after?: string | null; windowHours: number }) => {
       if (!WINDOWS.includes(windowHours)) throw new GraphQLError(`windowHours must be one of ${WINDOWS.join(', ')}`, { extensions: { code: 'BAD_WINDOW' } });
       const code = countryCode?.toUpperCase() === 'GLOBAL' ? null : countryCode;
       const leads = byCountry(code)
         .filter((a) => served.includes(a))
         .filter((a, i, list) => !a.story_key || list.findIndex((b) => b.story_key === a.story_key) === i);
-      const encode = (offset: number) => Buffer.from(JSON.stringify({ offset, builtAt: edition.builtAt }), 'utf-8').toString('base64');
+      const encode = (offset: number, builtAt?: string) => Buffer.from(JSON.stringify(builtAt ? { offset, builtAt } : { offset }), 'utf-8').toString('base64');
       let offset = 0;
       if (after != null) {
         let c: { offset?: unknown; builtAt?: unknown };
@@ -356,8 +357,8 @@ function resolversFor(options: FakeDataServerOptions, edition: { builtAt: string
         } catch {
           c = {};
         }
-        if (typeof c.offset !== 'number' || !Number.isInteger(c.offset) || c.offset < 0) throw new GraphQLError('after is not a cursor this server gave out', { extensions: { code: 'BAD_USER_INPUT' } });
-        if (c.builtAt !== edition.builtAt) throw new GraphQLError('The headline list was rebuilt after this cursor was given out. Start again from the first page.', { extensions: { code: 'EDITION_CHANGED' } });
+        if (after.length > 512 || typeof c.offset !== 'number' || !Number.isInteger(c.offset) || c.offset < 0 || (c.builtAt !== undefined && (typeof c.builtAt !== 'string' || Number.isNaN(Date.parse(c.builtAt))))) throw new GraphQLError('after is not a cursor this server gave out', { extensions: { code: 'BAD_USER_INPUT' } });
+        if (c.builtAt !== undefined && c.builtAt !== edition.builtAt) throw new GraphQLError('The headline list was rebuilt after this cursor was given out. Start again from the first page.', { extensions: { code: 'EDITION_CHANGED' } });
         offset = c.offset;
       }
       const size = clamp(first, 20, 1, 200);
@@ -366,7 +367,7 @@ function resolversFor(options: FakeDataServerOptions, edition: { builtAt: string
       const picked = page.map(withSource);
       return {
         articles: picked,
-        headlines: page.map((a, i) => ({ article: picked[i], clusterSize: reportsOf(a).length, cursor: encode(offset + i + 1), publisherCount: reportsOf(a).length < 2 ? 0 : new Set(reportsOf(a).map((r) => withDefaults(r, now).publication_name)).size, stableClusterId: `stable-${a.story_key ?? a._id}` })),
+        headlines: page.map((a, i) => ({ article: picked[i], clusterSize: reportsOf(a).length, cursor: encode(offset + i + 1, edition.builtAt), publisherCount: reportsOf(a).length < 2 ? 0 : new Set(reportsOf(a).map((r) => withDefaults(r, now).publication_name)).size, stableClusterId: `stable-${a.story_key ?? a._id}` })),
         editionBuiltAt: edition.builtAt,
         pageInfo: { endCursor: hasNextPage ? encode(offset + page.length) : null, hasNextPage, pageSize: page.length },
       };

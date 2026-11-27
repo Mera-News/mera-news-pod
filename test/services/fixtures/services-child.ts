@@ -14,7 +14,7 @@ const client = <T>(file: string) => require(`mera-news-client/dist/lib/${file}`)
 // The timers the client's delayed writes start (a mute's purge, a staged topic delete), told apart
 // by where they were made, so a test can ask about exactly those and not every timer in the process.
 const delayedWrites = new Set<unknown>();
-const DELAYED_WRITE = /publication-pref-ui-actions|topic-decline-service/;
+const DELAYED_WRITE = /publication-pref-ui-actions|topic-decline-service|notify\/ntfy/;
 const realSetTimeout = globalThis.setTimeout;
 const realClearTimeout = globalThis.clearTimeout;
 globalThis.setTimeout = ((fn: (...a: unknown[]) => void, ms?: number, ...args: unknown[]) => {
@@ -207,6 +207,7 @@ async function main() {
         case 'overlap': return reply({ overlap, runs });
         case 'stop': await pod.stop(); return send({ id: msg.id, value: null }, () => process.exit(0));
         // Stops the pod and answers how many delayed-write timers were alive before and after, then exits.
+        case 'timerCount': return reply(delayedWrites.size);
         case 'stopAndCountDelayedWrites': {
           const before = delayedWrites.size;
           await pod.stop();

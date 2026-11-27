@@ -8,7 +8,7 @@ import { sendWebhook } from './webhook';
 
 export const NOTIFY_LEVELS: readonly PickView['level'][] = ['emergency', 'high'];
 
-/** Rejected by `send` when some picks were delivered before a target failed: those are not sent again. */
+/** Rejected by a target when some picks were delivered before it failed: those are not sent again. */
 export class PartialSendError extends Error {
   constructor(
     message: string,
@@ -18,47 +18,31 @@ export class PartialSendError extends Error {
   }
 }
 
-export interface Notifier {
-  /**
-   * Rejects when any target failed. Picks are delivered in order; a rejection with `delivered` picks
-   * (a PartialSendError) means exactly the first `delivered` reached every target.
-   */
+/** One delivery target. Targets never wait on each other: the caller keeps a position for each. */
+export interface NotifyTarget {
+  name: 'ntfy' | 'webhook';
+  /** Rejects when it failed; a PartialSendError says how many of the first picks got through. `signal` ends a paced burst. */
   send(picks: readonly PickView[]): Promise<void>;
 }
 
-/** Undefined when no notifier is configured. */
-export function createNotifier(cfg: LoadedConfig, pace?: number): Notifier | undefined {
+/** Empty when no notifier is configured. The reason of a failure names the target and the status only, never the picks or the address. */
+export function createNotifier(cfg: LoadedConfig, pace?: number, signal?: AbortSignal): NotifyTarget[] {
   const { ntfy, webhook } = cfg.notify;
-  if (!ntfy && !webhook) return undefined;
-  return {
-    // ntfy goes first, one paced message per pick, and the webhook gets the picks ntfy delivered in one request,
-    // so a 429 part way leaves the rest for the retry instead of sending the whole batch again.
-    async send(picks) {
-      let sent = picks.length;
-      let failure: unknown;
-      if (ntfy) {
-        sent = 0;
+  const targets: NotifyTarget[] = [];
+  if (ntfy) {
+    targets.push({
+      name: 'ntfy',
+      async send(picks) {
+        let sent = 0;
         try {
-          await sendNtfy(ntfy.url, picks, pace, (n) => (sent = n));
+          await sendNtfy(ntfy.url, picks, pace, (n) => (sent = n), signal);
         } catch (error) {
-          failure = error;
+          const message = String((error as Error)?.message ?? error);
+          throw sent > 0 ? new PartialSendError(message, sent) : new Error(message);
         }
-      }
-      let delivered = sent;
-      if (webhook && sent > 0) {
-        try {
-          await sendWebhook(webhook.url, picks.slice(0, sent));
-        } catch (error) {
-          delivered = 0;
-          failure ??= error;
-        }
-      }
-      // The reason names the target and the status only, never the picks or the address.
-      if (failure) {
-        const message = String((failure as Error)?.message ?? failure);
-        if (delivered > 0) throw new PartialSendError(message, delivered);
-        throw new Error(message);
-      }
-    },
-  };
+      },
+    });
+  }
+  if (webhook) targets.push({ name: 'webhook', send: (picks) => sendWebhook(webhook.url, picks, signal) });
+  return targets;
 }

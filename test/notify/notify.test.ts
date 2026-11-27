@@ -354,20 +354,60 @@ test('notify: with only meraNewsApp on, the loop arms and emits', async () => {
   }
 });
 
-test('a 429 part way through a burst keeps the delivered count, and the retry sends only the rest', async () => {
+test('a 429 part way through a burst keeps the delivered count, and the webhook is a target of its own', async () => {
   const sink = await startSink();
   try {
     const picks = Array.from({ length: 5 }, (_, i) => pick({ id: `p${i}`, url: `https://example.com/p${i}` }));
     const cfg = { notify: { ntfy: { url: `${sink.origin}/t` }, webhook: { url: `${sink.origin}/w` } } } as never;
-    const notifier = createNotifier(cfg, 0)!;
+    const [ntfy, webhook] = createNotifier(cfg, 0);
     sink.tooManyAfter = 2;
-    await assert.rejects(notifier.send(picks), (e) => e instanceof PartialSendError && e.delivered === 2 && /429/.test(e.message));
-    sink.tooManyAfter = Infinity;
-    // The webhook got exactly the two delivered picks in one request, never the unsent ones.
-    const hook = JSON.parse(at(sink, '/w')[0].body);
-    assert.deepEqual(hook.picks.map((p: { url: string }) => p.url), ['https://example.com/p0', 'https://example.com/p1']);
-    assert.equal(sink.requests.length, 4, 'two ntfy messages and a refused third, no more');
+    await assert.rejects(ntfy.send(picks), (e) => e instanceof PartialSendError && e.delivered === 2 && /429/.test(e.message));
+    assert.equal(sink.requests.length, 3, 'two ntfy messages and a refused third, no more');
+    await webhook.send(picks);
+    assert.equal(JSON.parse(at(sink, '/w')[0].body).picks.length, 5, 'the webhook does not depend on what ntfy delivered');
   } finally {
+    await sink.close();
+  }
+});
+
+test('a failing ntfy does not hold the webhook back: it gets every pick, and ntfy sends its picks again later', async () => {
+  const ntfySink = await startSink();
+  ntfySink.status = 500;
+  const hookSink = await startSink();
+  const w = await world({ config: { notify: { ntfy: { enabled: true, url: `${ntfySink.origin}/ntfy` }, webhook: { enabled: true, url: `${hookSink.origin}/hook` } } } });
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('plant', [{ id: 'one', relevance: 0.85, publishedHoursAgo: 3 }, { id: 'two', relevance: 0.9, publishedHoursAgo: 2 }, { id: 'three', relevance: 1.1, publishedHoursAgo: 1 }]);
+    const hooked = () => at(hookSink, '/hook').flatMap((r) => (JSON.parse(r.body).picks as PickView[]).map((p) => p.url));
+    await until(async () => new Set(hooked()).size, (n) => n === 3, 'the webhook to get all three picks');
+    assert.equal(new Set(hooked()).size, hooked().length, 'the webhook got no pick twice');
+    assert.equal((await pod.ask('state')).notifiedSeq, 0, 'the saved position is the slowest target: ntfy delivered nothing');
+    ntfySink.status = 200;
+    await pod.ask('plant', [{ id: 'four', relevance: 0.9 }]);
+    await until(async () => ntfySink.requests.filter((r) => r.body === u('three')).length, (n) => n >= 1, 'ntfy to deliver the earlier picks');
+    assert.equal(hooked().filter((url) => url === u('one')).length, 1, 'the webhook did not repeat a delivered pick');
+    await pod.ask('stop');
+  } finally {
+    await w.close();
+    await ntfySink.close();
+    await hookSink.close();
+  }
+});
+
+test('stop cancels a paced ntfy burst in flight: no pace timer is left', async () => {
+  const sink = await startSink();
+  const w = await world({ config: { notify: { ntfy: { enabled: true, url: `${sink.origin}/ntfy` } } } });
+  try {
+    const pod = startServicesPod(w.home);
+    assert.deepEqual(await pod.first, { ready: true });
+    await pod.ask('plant', [0, 1, 2, 3].map((i) => ({ id: `burst${i}`, relevance: 0.9, publishedHoursAgo: 4 - i })));
+    await until(async () => pod.ask('timerCount'), (n) => (n as number) >= 1, 'a pace timer to be waiting');
+    const { before, after } = (await pod.ask('stopAndCountDelayedWrites')) as { before: number; after: number };
+    assert.ok(before >= 1);
+    assert.equal(after, 0, 'stop cleared the pace timer');
+  } finally {
+    await w.close();
     await sink.close();
   }
 });

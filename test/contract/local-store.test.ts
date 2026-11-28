@@ -172,7 +172,7 @@ test('the pod reads the one-computer store: first picks, the read tools, and eve
 
     // 3. The store accepted every document the pod sent, and answered the read tools' own queries.
     assert.deepEqual(refusedNames, [], `the store refused: ${refusedNames.join(', ')}`);
-    for (const name of ['GetArticleIdsForPersona', 'GetArticlesForTopicsByIds', 'SearchNews', 'GetArticlesForCountry']) assert.ok(seen.names.includes(name), `${name} was sent`);
+    for (const name of ['GetArticleIdsForPersonaForLanguage', 'GetArticlesForTopicsByIds', 'SearchNews', 'GetArticlesForCountry']) assert.ok(seen.names.includes(name), `${name} was sent`);
     assert.deepEqual(seen.codes.filter((c) => c === 'INTERNAL_SERVER_ERROR' || c === 'unparsable'), []);
     assert.deepEqual(lines.filter((l) => /blocked request to|ERR_MODULE_NOT_FOUND/.test(l)), []);
   } finally {

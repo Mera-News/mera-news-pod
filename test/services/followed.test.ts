@@ -93,7 +93,7 @@ test('followed stories: follow by text, grow with reads, fold copies, page, mark
     assert.equal((await call(pod, 'followed.get', followed.id)).error?.code, 'unknown_story');
     assert.equal((await call(pod, 'followed.unfollow', followed.id)).error?.code, 'unknown_story');
     // Its search stops: the next read asks for the other story's search only.
-    const searched = () => w.data.requests.slice(asked).filter((r: any) => r.body?.operationName === 'GetArticleIdsForPersona').flatMap((r: any) => r.body.variables.query.topics.map((t: any) => t.text));
+    const searched = () => w.data.requests.slice(asked).filter((r: any) => r.body?.operationName?.startsWith('GetArticleIdsForPersona')).flatMap((r: any) => r.body.variables.query.topics.map((t: any) => t.text));
     await until(async () => (await pod.ask('trigger'), searched()), (t) => t.length > 0, 'a read after the unfollow');
     assert.deepEqual([...new Set(searched())], ['Nurse strikes']);
 
